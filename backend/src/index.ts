@@ -24,8 +24,8 @@ async function main() {
 
   // ── WebSocket endpoint ───────────────────────────────────────────────────────
   app.get('/ws', { websocket: true }, (socket) => {
-    registerClient(socket);
-    socket.send(JSON.stringify({ type: 'CONNECTED', timestamp: new Date().toISOString() }));
+    registerClient(socket.socket);
+    socket.socket.send(JSON.stringify({ type: 'CONNECTED', timestamp: new Date().toISOString() }));
   });
 
   // ── Routes ───────────────────────────────────────────────────────────────────
