@@ -1,0 +1,158 @@
+---
+# Artillery Load Testing Configuration
+# 
+# Run with: artillery run artillery-load-test.yml
+# Or quick test: artillery quick --count 100 --num 10 http://localhost:3001/signals
+#
+# This configuration simulates realistic signal ingestion patterns
+# with different component types and error scenarios.
+
+config:
+  target: "http://localhost:3001"
+  phases:
+    # Phase 1: Warm-up (30 seconds, 10 req/s)
+    - duration: 30
+      arrivalRate: 10
+      name: "Warmup"
+
+    # Phase 2: Steady state (60 seconds, 100 req/s)
+    - duration: 60
+      arrivalRate: 100
+      name: "Steady state"
+
+    # Phase 3: Ramp-up (60 seconds, 100→500 req/s)
+    - duration: 60
+      arrivalRate: 500
+      rampTo: 500
+      name: "Ramp-up to high load"
+
+    # Phase 4: Peak load (60 seconds, 500 req/s)
+    - duration: 60
+      arrivalRate: 500
+      name: "Peak load"
+
+    # Phase 5: Cool-down (30 seconds, 500→10 req/s)
+    - duration: 30
+      arrivalRate: 10
+      name: "Cool-down"
+
+  defaults:
+    headers:
+      Content-Type: "application/json"
+      X-API-Key: "dev-key-12345"
+    timeout: 10
+
+  processor: "./load-test-processor.js"
+
+  variables:
+    componentIds:
+      - "postgres-primary"
+      - "postgres-replica-1"
+      - "postgres-replica-2"
+      - "redis-cache"
+      - "mongodb-primary"
+      - "api-gateway"
+      - "worker-queue"
+      - "load-balancer"
+      - "message-broker"
+      - "cache-cluster"
+
+    errorCodes:
+      - "CONNECTION_TIMEOUT"
+      - "QUERY_TIMEOUT"
+      - "MEMORY_EXCEEDED"
+      - "HIGH_LATENCY"
+      - "REPLICATION_LAG"
+      - "POOL_EXHAUSTED"
+      - "DISK_FULL"
+      - "CPU_SPIKE"
+      - "NETWORK_TIMEOUT"
+      - "AUTH_FAILURE"
+
+    componentTypes:
+      - "RDBMS"
+      - "CACHE"
+      - "API"
+      - "QUEUE"
+      - "NOSQL"
+      - "MCP_HOST"
+
+  # Enable detailed reporting
+  http:
+    timeout: 10
+    max: 100
+
+scenarios:
+  - name: "Signal Ingestion - RDBMS Failures"
+    weight: 25
+    flow:
+      - post:
+          url: "/signals"
+          json:
+            componentId: "{{ componentIds[] }}"
+            componentType: "RDBMS"
+            errorCode: "{{ errorCodes[] }}"
+            message: "Database component failure"
+            latencyMs: "{{ randomNumber(100, 5000) }}"
+
+  - name: "Signal Ingestion - API Failures"
+    weight: 25
+    flow:
+      - post:
+          url: "/signals"
+          json:
+            componentId: "{{ componentIds[] }}"
+            componentType: "API"
+            errorCode: "{{ errorCodes[] }}"
+            message: "API service degradation"
+            latencyMs: "{{ randomNumber(50, 2000) }}"
+
+  - name: "Signal Ingestion - Cache Failures"
+    weight: 20
+    flow:
+      - post:
+          url: "/signals"
+          json:
+            componentId: "{{ componentIds[] }}"
+            componentType: "CACHE"
+            errorCode: "{{ errorCodes[] }}"
+            message: "Cache layer issue"
+            latencyMs: "{{ randomNumber(10, 1000) }}"
+
+  - name: "Signal Ingestion - Queue Failures"
+    weight: 15
+    flow:
+      - post:
+          url: "/signals"
+          json:
+            componentId: "{{ componentIds[] }}"
+            componentType: "QUEUE"
+            errorCode: "{{ errorCodes[] }}"
+            message: "Message queue backlog"
+            latencyMs: "{{ randomNumber(500, 3000) }}"
+
+  - name: "Signal Ingestion - NoSQL Failures"
+    weight: 15
+    flow:
+      - post:
+          url: "/signals"
+          json:
+            componentId: "{{ componentIds[] }}"
+            componentType: "NOSQL"
+            errorCode: "{{ errorCodes[] }}"
+            message: "NoSQL database issue"
+            latencyMs: "{{ randomNumber(200, 4000) }}"
+
+  - name: "Health Check"
+    weight: 5
+    flow:
+      - get:
+          url: "/health"
+
+# Expected metrics after load test:
+# - Total requests: ~17,100
+# - Average latency: <200ms
+# - P95 latency: <500ms
+# - P99 latency: <1000ms
+# - Success rate: >99%
+# - Error rate: <1%
