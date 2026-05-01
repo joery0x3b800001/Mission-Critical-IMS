@@ -10,4 +10,17 @@ export const config = {
   rateLimitWindowMs: 10_000,
   metricsIntervalMs: 5_000,
   workerConcurrency: 10,
+  // ─ Security Configuration ────────────────────────────────────────────────────
+  // API Key validation (optional, for demo)
+  enableApiKeyAuth: process.env.ENABLE_API_KEY_AUTH === 'true',
+  apiKey: process.env.API_KEY ?? 'dev-key-12345',
+  // Maximum payload size for signals
+  maxSignalPayloadBytes: 10_000, // 10KB max per signal
+  // Maximum message length
+  maxMessageLength: 1000,
+  maxErrorCodeLength: 100,
+  maxComponentIdLength: 255,
+  // Per-IP rate limiting (additional to global rate limit)
+  perIpRateLimitMax: 1000,
+  perIpRateLimitWindowMs: 60_000, // 1 minute
 };
