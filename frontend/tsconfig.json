@@ -13,6 +13,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": false,
+    "sourceMap": false,
     "noUnusedParameters": false
   },
   "include": ["src"]
