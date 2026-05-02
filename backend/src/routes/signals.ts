@@ -35,6 +35,11 @@ const SignalSchema = z.object({
     .optional(),
 });
 
+// ── Batch schema — up to 100 signals per request ──────────────────────────────
+const BatchSignalSchema = z.object({
+  signals: z.array(SignalSchema).min(1).max(100),
+});
+
 type Signal = z.infer<typeof SignalSchema>;
 
 export async function signalRoutes(app: FastifyInstance) {
@@ -53,7 +58,7 @@ export async function signalRoutes(app: FastifyInstance) {
     });
   }
 
-  // ── Signal Ingestion Endpoint ────────────────────────────────────────────────
+  // ── Single Signal Ingestion ────────────────────────────────────────────────
   app.post<{ Body: Signal }>(
     '/signals',
     {
@@ -62,35 +67,18 @@ export async function signalRoutes(app: FastifyInstance) {
           type: 'object',
           required: ['componentId', 'componentType', 'errorCode', 'message'],
           properties: {
-            componentId: { type: 'string' },
+            componentId:   { type: 'string' },
             componentType: { type: 'string', enum: ['RDBMS', 'CACHE', 'API', 'QUEUE', 'NOSQL', 'MCP_HOST'] },
-            errorCode: { type: 'string' },
-            message: { type: 'string' },
-            latencyMs: { type: 'number' },
-            metadata: { type: 'object' },
-            timestamp: { type: 'string', format: 'date-time' },
-          },
-        },
-        response: {
-          202: {
-            type: 'object',
-            properties: {
-              accepted: { type: 'boolean' },
-              timestamp: { type: 'string', format: 'date-time' },
-            },
-          },
-          400: {
-            type: 'object',
-            properties: {
-              error: { type: 'string' },
-              details: { type: 'object' },
-            },
+            errorCode:     { type: 'string' },
+            message:       { type: 'string' },
+            latencyMs:     { type: 'number' },
+            metadata:      { type: 'object' },
+            timestamp:     { type: 'string', format: 'date-time' },
           },
         },
       },
     },
     async (req, reply) => {
-      // ── Validate Signal Schema ───────────────────────────────────────────────
       const parsed = SignalSchema.safeParse(req.body);
       if (!parsed.success) {
         app.log.warn(
@@ -109,42 +97,64 @@ export async function signalRoutes(app: FastifyInstance) {
       };
 
       try {
-        // ── Enqueue Signal with Priority ─────────────────────────────────────────
-        // RDBMS and MCP_HOST failures are P0 (priority 1 = highest)
         const priority = signal.componentType === 'RDBMS' || signal.componentType === 'MCP_HOST' ? 1 : 2;
         await signalQueue.add('signal', signal, { priority });
-
-        // ── Increment Throughput Metric ──────────────────────────────────────────
         await redis.incr(Keys.throughput());
 
-        // ── Log Signal Ingestion ─────────────────────────────────────────────────
-        app.log.info(
-          {
-            componentId: signal.componentId,
-            componentType: signal.componentType,
-            errorCode: signal.errorCode,
-            priority,
-            ip: req.ip,
-          },
-          'Signal ingested successfully'
-        );
-
         return reply.status(202).send({
-          accepted: true,
+          accepted:  true,
           timestamp: signal.timestamp,
         });
       } catch (error) {
-        app.log.error(
-          {
-            error,
-            signal,
-            ip: req.ip,
-          },
-          'Failed to queue signal'
-        );
+        app.log.error({ error, signal }, 'Failed to queue signal');
         return reply.status(503).send({
-          error: 'Service temporarily unavailable',
+          error:   'Service temporarily unavailable',
           message: 'Failed to process signal. Please retry.',
+        });
+      }
+    }
+  );
+
+  // ── Batch Signal Ingestion — 100 signals per HTTP round-trip ─────────────
+  // This is the high-throughput path used by the burst test and any producer
+  // that batches signals client-side. Reduces TCP overhead by up to 100x.
+  app.post(
+    '/signals/batch',
+    {
+      // Override body limit for batch: 100 signals × ~500 bytes each = ~50 KB
+      config: { rawBody: false },
+    },
+    async (req, reply) => {
+      const parsed = BatchSignalSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error:   'Invalid batch payload',
+          details: parsed.error.flatten(),
+        });
+      }
+
+      const now  = new Date().toISOString();
+      const jobs = parsed.data.signals.map((s) => ({
+        name: 'signal',
+        data: { ...s, timestamp: s.timestamp ?? now },
+        opts: {
+          priority: s.componentType === 'RDBMS' || s.componentType === 'MCP_HOST' ? 1 : 2,
+        },
+      }));
+
+      try {
+        await signalQueue.addBulk(jobs);
+        await redis.incrby(Keys.throughput(), jobs.length);
+
+        return reply.status(202).send({
+          accepted: true,
+          count:    jobs.length,
+        });
+      } catch (error) {
+        app.log.error({ error, count: jobs.length }, 'Failed to queue batch');
+        return reply.status(503).send({
+          error:   'Service temporarily unavailable',
+          message: 'Failed to process batch. Please retry.',
         });
       }
     }

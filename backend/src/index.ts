@@ -11,7 +11,7 @@ import { startWorker, signalQueue } from './queue/signalQueue';
 import { registerClient } from './ws/broadcaster';
 
 async function main() {
-  const app = Fastify({ logger: { level: 'warn' } });
+  const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 1_048_576 }); // 1MB — supports batch of 100 signals
 
   // ── Plugins ─────────────────────────────────────────────────────────────────
   await app.register(cors, { origin: '*' });
