@@ -519,7 +519,3 @@ docker compose up --build
 The debounce window is 10 seconds. If you run the simulation script twice within 10 seconds for the same `componentId`, the second run creates no new Work Items (by design). Run `reset-data.sh` between runs.
 
 ---
-
-## Prompts and AI Usage
-
-All Claude prompts, planning documents, and AI-assisted generation specs used to build this system are checked into the repository in `Plan.md`, `IMPLEMENTATION_SUMMARY.md`, and `FIX_SUMMARY.md` as required by the submission guidelines.
