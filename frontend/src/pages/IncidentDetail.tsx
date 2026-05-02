@@ -41,15 +41,35 @@ export function IncidentDetailPage() {
       const data = await api.getIncident(id);
       setDetail(data);
       if (data.rca) {
+        // Extract datetime-local format (YYYY-MM-DDTHH:mm) from ISO string
+        const parseDateTime = (isoStr: string) => isoStr.substring(0, 16);
         setRcaForm({
-          incidentStart: data.rca.incidentStart.slice(0, 16),
-          incidentEnd: data.rca.incidentEnd.slice(0, 16),
+          incidentStart: parseDateTime(data.rca.incidentStart),
+          incidentEnd: parseDateTime(data.rca.incidentEnd),
           rootCauseCategory: data.rca.rootCauseCategory,
           fixApplied: data.rca.fixApplied,
           preventionSteps: data.rca.preventionSteps,
         });
-      } else if (data.workItem.startTime) {
-        setRcaForm(f => ({ ...f, incidentStart: data.workItem.startTime.slice(0, 16) }));
+      } else {
+        // Initialize end date based on closed time or 1 hour after start
+        let endTime = '';
+        if (data.workItem.closedAt) {
+          endTime = data.workItem.closedAt.substring(0, 16);
+        } else if (data.workItem.startTime) {
+          const startDate = new Date(data.workItem.startTime);
+          startDate.setHours(startDate.getHours() + 1);
+          endTime = startDate.toISOString().substring(0, 16);
+        }
+
+        if (data.workItem.startTime) {
+          setRcaForm(f => ({
+            ...f,
+            incidentStart: data.workItem.startTime.substring(0, 16),
+            incidentEnd: endTime,
+          }));
+        } else if (endTime) {
+          setRcaForm(f => ({ ...f, incidentEnd: endTime }));
+        }
       }
     } catch (e) {
       setActionError((e as Error).message);
@@ -79,17 +99,60 @@ export function IncidentDetailPage() {
   const handleRcaSubmit = async () => {
     if (!detail) return;
     setRcaError(null);
-    if (!rcaForm.fixApplied || rcaForm.fixApplied.length < 10) {
-      setRcaError('Fix Applied must be at least 10 characters'); return;
+    setRcaSuccess(false);
+
+    // Validate incident dates
+    const startValue = rcaForm.incidentStart?.trim() || '';
+    const endValue = rcaForm.incidentEnd?.trim() || '';
+
+    if (!startValue) {
+      setRcaError('Incident start date is required');
+      return;
     }
-    if (!rcaForm.preventionSteps || rcaForm.preventionSteps.length < 10) {
-      setRcaError('Prevention Steps must be at least 10 characters'); return;
+    if (!endValue) {
+      setRcaError('Incident end date is required');
+      return;
     }
+
+    const startDate = new Date(startValue);
+    const endDate = new Date(endValue);
+
+    if (isNaN(startDate.getTime())) {
+      setRcaError('Invalid incident start date format');
+      return;
+    }
+    if (isNaN(endDate.getTime())) {
+      setRcaError('Invalid incident end date format');
+      return;
+    }
+    if (startDate >= endDate) {
+      setRcaError('Incident end time must be after start time');
+      return;
+    }
+
+    // Validate RCA fields
+    const fixValue = rcaForm.fixApplied?.trim() || '';
+    const preventionValue = rcaForm.preventionSteps?.trim() || '';
+
+    if (!fixValue || fixValue.length < 10) {
+      setRcaError('Fix Applied must be at least 10 characters');
+      return;
+    }
+    if (!preventionValue || preventionValue.length < 10) {
+      setRcaError('Prevention Steps must be at least 10 characters');
+      return;
+    }
+
     try {
+      // Send datetime-local strings directly as ISO format with :00Z
+      // This preserves the user's entered local time without timezone conversion
+      const incidentStartISO = startValue.length === 16 ? `${startValue}:00Z` : startValue;
+      const incidentEndISO = endValue.length === 16 ? `${endValue}:00Z` : endValue;
+
       await api.submitRca(detail.workItem.id, {
         ...rcaForm,
-        incidentStart: new Date(rcaForm.incidentStart).toISOString(),
-        incidentEnd: new Date(rcaForm.incidentEnd).toISOString(),
+        incidentStart: incidentStartISO,
+        incidentEnd: incidentEndISO,
       });
       setRcaSuccess(true);
       await load();
@@ -192,7 +255,10 @@ export function IncidentDetailPage() {
                 <input
                   type="datetime-local"
                   value={rcaForm.incidentStart}
-                  onChange={e => setRcaForm(f => ({ ...f, incidentStart: e.target.value }))}
+                  onChange={e => {
+                    setRcaForm(f => ({ ...f, incidentStart: e.target.value }));
+                    setRcaError(null);
+                  }}
                   className="w-full bg-bg border border-border rounded px-3 py-2 text-sm mono text-white focus:border-accent outline-none"
                 />
               </div>
@@ -201,7 +267,10 @@ export function IncidentDetailPage() {
                 <input
                   type="datetime-local"
                   value={rcaForm.incidentEnd}
-                  onChange={e => setRcaForm(f => ({ ...f, incidentEnd: e.target.value }))}
+                  onChange={e => {
+                    setRcaForm(f => ({ ...f, incidentEnd: e.target.value }));
+                    setRcaError(null);
+                  }}
                   className="w-full bg-bg border border-border rounded px-3 py-2 text-sm mono text-white focus:border-accent outline-none"
                 />
               </div>

@@ -107,7 +107,7 @@ describe('WorkItemState Pattern', () => {
       mockClient.query
         .mockResolvedValueOnce(undefined) // BEGIN
         .mockResolvedValueOnce({
-          rows: [{ start_time: '2024-01-01T00:00:00Z', incident_end: '2024-01-01T00:10:00Z' }],
+          rows: [{ incident_start: '2024-01-01T00:00:00Z', incident_end: '2024-01-01T00:10:00Z' }],
         }) // SELECT
         .mockResolvedValueOnce(undefined) // UPDATE
         .mockResolvedValueOnce(undefined); // COMMIT
@@ -132,7 +132,7 @@ describe('WorkItemState Pattern', () => {
       mockClient.query
         .mockResolvedValueOnce(undefined) // BEGIN
         .mockResolvedValueOnce({
-          rows: [{ start_time: startTime.toISOString(), incident_end: endTime.toISOString() }],
+          rows: [{ incident_start: startTime.toISOString(), incident_end: endTime.toISOString() }],
         }) // SELECT
         .mockResolvedValueOnce(undefined) // UPDATE
         .mockResolvedValueOnce(undefined); // COMMIT
@@ -243,7 +243,7 @@ describe('WorkItemState Pattern', () => {
       mockClient.query
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce({
-          rows: [{ start_time: '2024-01-01T00:00:00Z', incident_end: '2024-01-01T00:05:00Z' }],
+          rows: [{ incident_start: '2024-01-01T00:00:00Z', incident_end: '2024-01-01T00:05:00Z' }],
         })
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined);

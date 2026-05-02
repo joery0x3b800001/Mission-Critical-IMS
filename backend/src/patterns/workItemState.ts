@@ -46,7 +46,7 @@ export class ResolvedState implements WorkItemState {
       try {
         await client.query('BEGIN');
         const { rows } = await client.query(
-          `SELECT w.start_time, r.incident_end
+          `SELECT r.incident_start, r.incident_end
            FROM work_items w
            JOIN rca_records r ON r.work_item_id = w.id
            WHERE w.id = $1 FOR UPDATE`,
@@ -54,7 +54,7 @@ export class ResolvedState implements WorkItemState {
         );
         if (!rows[0]) throw new Error('Work item or RCA not found');
         const mttrSeconds = Math.round(
-          (new Date(rows[0].incident_end).getTime() - new Date(rows[0].start_time).getTime()) / 1000
+          (new Date(rows[0].incident_end).getTime() - new Date(rows[0].incident_start).getTime()) / 1000
         );
         await client.query(
           `UPDATE work_items
