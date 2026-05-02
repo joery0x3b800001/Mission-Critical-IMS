@@ -51,4 +51,5 @@ export async function getQueueDepth(): Promise<number> {
 export async function closeQueue(): Promise<void> {
   await signalQueue.close();
   if (worker) await worker.close();
+  console.log('[Queue] Closed');
 }

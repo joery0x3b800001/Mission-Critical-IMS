@@ -28,3 +28,10 @@ export async function withRetry<T>(
   }
   throw new Error('Unreachable');
 }
+
+export async function closePostgresPool(): Promise<void> {
+  if (pgPool) {
+    await pgPool.end();
+    console.log('[Postgres] Pool closed');
+  }
+}

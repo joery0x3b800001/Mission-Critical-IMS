@@ -6,23 +6,35 @@ import { config } from '../config';
 import { resolveAlertStrategy, AlertContext } from '../patterns/alertStrategy';
 import { broadcastUpdate } from '../ws/broadcaster';
 
+// Use Lua script for atomic debounce check
+const DEBOUNCE_SCRIPT = `
+-- KEYS[1] = debounce key
+-- ARGV[1] = window TTL in ms
+-- Returns: 1 if first signal, 0 if duplicate
+
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  return 1
+end
+return 0
+`;
+
 export async function processSignal(signal: Signal): Promise<void> {
   const { componentId, componentType, errorCode } = signal;
 
-  // 1. Always store raw signal in MongoDB (fire-and-forget path)
-  let workItemId: string | null = null;
-
-  // 2. Debounce: atomic INCR in Redis
   const debounceKey = Keys.debounce(componentId);
   const wiKey = Keys.workItemId(componentId);
 
-  const count = await redis.incr(debounceKey);
-  if (count === 1) {
-    // First signal in this window → set TTL
-    await redis.pexpire(debounceKey, config.debounceWindowMs);
-  }
+  // 1. Atomic debounce check using Lua script
+  const isFirstSignal = await redis.eval(
+    DEBOUNCE_SCRIPT,
+    1,
+    debounceKey,
+    config.debounceWindowMs
+  );
 
-  if (count === 1) {
+  if (isFirstSignal === 1) {
     // Create Work Item (only once per debounce window)
     const strategy = resolveAlertStrategy(componentType);
     const ctx = new AlertContext(strategy);
@@ -49,8 +61,14 @@ export async function processSignal(signal: Signal): Promise<void> {
       }
     });
 
-    workItemId = newWorkItem.id;
-    await redis.set(wiKey, workItemId, 'EX', Math.ceil(config.debounceWindowMs / 1000) + 60);
+    const workItemId = newWorkItem.id;
+    // Set work item ID in Redis with TTL
+    await redis.set(
+      wiKey,
+      workItemId,
+      'EX',
+      Math.ceil(config.debounceWindowMs / 1000) + 60
+    );
 
     // Fire alert
     ctx.notify(componentId, workItemId);
@@ -59,8 +77,8 @@ export async function processSignal(signal: Signal): Promise<void> {
     broadcastUpdate({ type: 'WORK_ITEM_CREATED', workItemId, componentId, priority });
 
   } else {
-    // Subsequent signal: just increment signal_count in Postgres
-    workItemId = await redis.get(wiKey);
+    // Subsequent signal: increment signal_count in Postgres
+    const workItemId = await redis.get(wiKey);
     if (workItemId) {
       await withRetry(() =>
         pgPool.query(
@@ -68,19 +86,26 @@ export async function processSignal(signal: Signal): Promise<void> {
           [workItemId]
         )
       );
+    } else {
+      // Fallback: debounce window expired but signal still arriving
+      // Treat as new signal by clearing debounce key
+      await redis.del(debounceKey);
+      // Recursive call to process as first signal
+      return processSignal(signal);
     }
   }
 
-  // 3. Always write raw signal to MongoDB
+  // 2. Always write raw signal to MongoDB
   try {
     const col = await getRawSignalsCollection();
-    await col.insertOne({ ...signal, workItemId, ingestedAt: new Date() });
+    const workItemId = await redis.get(wiKey);
+    await col.insertOne({ ...signal, workItemId: workItemId || null, ingestedAt: new Date() });
   } catch (err) {
     console.error('[Mongo] Failed to store raw signal:', (err as Error).message);
     // Non-fatal — audit log write failure doesn't block processing
   }
 
-  // 4. Timeseries metric
+  // 3. Timeseries metric (best effort)
   try {
     await pgPool.query(
       `INSERT INTO signal_metrics (time, component_id, signal_count) VALUES (NOW(), $1, 1)`,

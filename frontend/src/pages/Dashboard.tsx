@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { WorkItem } from '../types';
 import { PriorityBadge, StatusBadge } from '../components/Badges';
 import { useWsStore } from '../store/wsStore';
 import { formatDistanceToNow } from 'date-fns';
+
+const REFETCH_DEBOUNCE_MS = 1000; // Debounce rapid events
 
 export function Dashboard() {
   const [incidents, setIncidents] = useState<WorkItem[]>([]);
@@ -13,6 +15,11 @@ export function Dashboard() {
   const lastEvent = useWsStore((s) => s.lastEvent);
   const connected = useWsStore((s) => s.connected);
   const navigate = useNavigate();
+
+  // Debounce timer for refetch
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Track if we need to refetch after current debounce
+  const shouldRefetchRef = useRef(false);
 
   const fetchIncidents = useCallback(async () => {
     try {
@@ -26,12 +33,74 @@ export function Dashboard() {
     }
   }, []);
 
-  useEffect(() => { fetchIncidents(); }, [fetchIncidents]);
+  // Debounced refetch on WebSocket events
+  const scheduleRefetch = useCallback(() => {
+    shouldRefetchRef.current = true;
 
-  // Refresh on any WS event
+    if (debounceTimerRef.current) {
+      // Timer already running, next batch will pick up changes
+      return;
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      if (shouldRefetchRef.current) {
+        fetchIncidents();
+        shouldRefetchRef.current = false;
+      }
+      debounceTimerRef.current = null;
+    }, REFETCH_DEBOUNCE_MS);
+  }, [fetchIncidents]);
+
+  // Selective update based on event type
+  const handleWebSocketEvent = useCallback((event: Record<string, unknown>) => {
+    const eventType = event.type as string;
+
+    // For status/RCA changes, we can update locally without full refetch
+    if (eventType === 'STATUS_CHANGED') {
+      const { workItemId, status } = event as { workItemId: string; status: string };
+      setIncidents((prev) =>
+        prev.map((inc) =>
+          inc.id === workItemId ? { ...inc, status: status as any } : inc
+        )
+      );
+      return;
+    }
+
+    if (eventType === 'RCA_SUBMITTED') {
+      // For RCA, no need to refetch dashboard
+      return;
+    }
+
+    // For work item creation/updates, debounce and refetch
+    if (eventType === 'WORK_ITEM_CREATED') {
+      scheduleRefetch();
+      return;
+    }
+
+    // Default: schedule refetch
+    scheduleRefetch();
+  }, [scheduleRefetch]);
+
+  // Initial fetch
   useEffect(() => {
-    if (lastEvent) fetchIncidents();
-  }, [lastEvent, fetchIncidents]);
+    fetchIncidents();
+  }, [fetchIncidents]);
+
+  // Handle WS events with selective updates
+  useEffect(() => {
+    if (lastEvent) {
+      handleWebSocketEvent(lastEvent);
+    }
+  }, [lastEvent, handleWebSocketEvent]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   const activeCount = incidents.filter(i => i.status !== 'CLOSED').length;
   const p0Count = incidents.filter(i => i.priority === 'P0' && i.status !== 'CLOSED').length;
