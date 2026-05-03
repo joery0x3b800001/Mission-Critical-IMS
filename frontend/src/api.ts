@@ -11,8 +11,16 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getIncidents: () => req<import('./types').WorkItem[]>('/incidents'),
-  getIncident: (id: string) => req<import('./types').IncidentDetail>(`/incidents/${id}`),
+  // Fetch incidents with pagination support
+  getIncidents: (offset = 0, limit = 50) =>
+    req<{ incidents: import('./types').WorkItem[]; pagination: { offset: number; limit: number; total: number; hasMore: boolean } }>(
+      `/incidents?offset=${offset}&limit=${limit}`
+    ),
+  // Fetch single incident detail with optional raw signals pagination
+  getIncident: (id: string, signalOffset = 0, signalLimit = 50) =>
+    req<import('./types').IncidentDetail>(
+      `/incidents/${id}?signalOffset=${signalOffset}&signalLimit=${signalLimit}`
+    ),
   updateStatus: (id: string, status: string) =>
     req(`/incidents/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   submitRca: (id: string, rca: Record<string, string>) =>

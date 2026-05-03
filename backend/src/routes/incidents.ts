@@ -24,9 +24,17 @@ const StatusSchema = z.object({
 });
 
 export async function incidentRoutes(app: FastifyInstance) {
-  // GET /incidents — list (from Redis cache, fallback to Postgres)
-  app.get('/incidents', async (_req, reply) => {
+  // GET /incidents — list with pagination support
+  // Query params: offset (default 0), limit (default 50, max 200)
+  app.get('/incidents', async (req, reply) => {
+    const offset = Math.max(0, parseInt((req.query as any).offset ?? '0', 10));
+    const limit = Math.min(200, Math.max(1, parseInt((req.query as any).limit ?? '50', 10)));
+    
     try {
+      // Fetch total count for pagination metadata
+      const { rows: countRows } = await pgPool.query(`SELECT COUNT(*) as total FROM work_items`);
+      const total = parseInt(countRows[0].total, 10);
+      
       const { rows } = await pgPool.query(
         `SELECT w.*, r.root_cause_category
          FROM work_items w
@@ -34,17 +42,24 @@ export async function incidentRoutes(app: FastifyInstance) {
          ORDER BY
            CASE priority WHEN 'P0' THEN 1 WHEN 'P1' THEN 2 ELSE 3 END,
            w.start_time DESC
-         LIMIT 200`
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
       );
-      return reply.send(rows.map(toWorkItem));
+      return reply.send({
+        incidents: rows.map(toWorkItem),
+        pagination: { offset, limit, total, hasMore: offset + rows.length < total }
+      });
     } catch (err) {
       return reply.status(500).send({ error: 'Failed to fetch incidents' });
     }
   });
 
-  // GET /incidents/:id — detail with raw signals
+  // GET /incidents/:id — detail with raw signals (paginated)
   app.get('/incidents/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const signalOffset = Math.max(0, parseInt((req.query as any).signalOffset ?? '0', 10));
+    const signalLimit = Math.min(100, Math.max(1, parseInt((req.query as any).signalLimit ?? '50', 10)));
+    
     try {
       const { rows } = await pgPool.query(
         `SELECT w.*, r.id as rca_id, r.incident_start, r.incident_end,
@@ -56,15 +71,24 @@ export async function incidentRoutes(app: FastifyInstance) {
       );
       if (!rows[0]) return reply.status(404).send({ error: 'Incident not found' });
 
-      // Fetch raw signals from MongoDB
+      // Fetch raw signals from MongoDB with pagination
       const col = await getRawSignalsCollection();
-      const signals = await col
-        .find({ workItemId: id }, { projection: { _id: 0 } })
-        .sort({ ingestedAt: -1 })
-        .limit(500)
-        .toArray();
+      const [signals, totalSignals] = await Promise.all([
+        col
+          .find({ workItemId: id }, { projection: { _id: 0 } })
+          .sort({ ingestedAt: -1 })
+          .skip(signalOffset)
+          .limit(signalLimit)
+          .toArray(),
+        col.countDocuments({ workItemId: id })
+      ]);
 
-      return reply.send({ workItem: toWorkItem(rows[0]), rca: toRca(rows[0]), rawSignals: signals });
+      return reply.send({
+        workItem: toWorkItem(rows[0]),
+        rca: toRca(rows[0]),
+        rawSignals: signals,
+        signalsPagination: { offset: signalOffset, limit: signalLimit, total: totalSignals, hasMore: signalOffset + signals.length < totalSignals }
+      });
     } catch (err) {
       return reply.status(500).send({ error: 'Failed to fetch incident detail' });
     }

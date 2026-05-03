@@ -9,7 +9,7 @@ export const config = {
   rateLimitMax: 10_000,
   rateLimitWindowMs: 10_000,
   metricsIntervalMs: 5_000,
-  workerConcurrency: 10,
+  workerConcurrency: parseInt(process.env.WORKER_CONCURRENCY ?? `${require('os').cpus().length * 2}`, 10),
   // ─ Security Configuration ────────────────────────────────────────────────────
   // API Key validation (optional, for demo)
   enableApiKeyAuth: process.env.ENABLE_API_KEY_AUTH === 'true',
@@ -23,4 +23,9 @@ export const config = {
   // Per-IP rate limiting (additional to global rate limit)
   perIpRateLimitMax: 1000,
   perIpRateLimitWindowMs: 60_000, // 1 minute
+  // Default pagination limits
+  defaultIncidentsLimit: 50,
+  maxIncidentsLimit: 200,
+  defaultSignalsLimit: 50,
+  maxSignalsLimit: 100,
 };

@@ -14,13 +14,16 @@ export function registerClient(ws: WebSocket): void {
 }
 
 export function broadcastUpdate(payload: Record<string, unknown>): void {
-  const message = JSON.stringify(payload);
+  // Pre-serialize message once instead of in every loop iteration (memory optimization)
+  let message: string | null = null;
   const deadClients: WebSocket[] = [];
 
   for (const client of clients) {
     try {
       // Double-check connection state
       if (client.readyState === WebSocket.OPEN) {
+        // Lazy-serialize message only if there are open clients
+        if (!message) message = JSON.stringify(payload);
         client.send(message);
       } else if (client.readyState !== WebSocket.CONNECTING) {
         // Mark for removal if not open or connecting

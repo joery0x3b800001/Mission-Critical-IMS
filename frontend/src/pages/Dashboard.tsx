@@ -23,8 +23,9 @@ export function Dashboard() {
 
   const fetchIncidents = useCallback(async () => {
     try {
-      const data = await api.getIncidents();
-      setIncidents(data);
+      const data = await api.getIncidents(0, 200);
+      // Extract incidents from paginated response
+      setIncidents(data.incidents || data as any);
       setError(null);
     } catch (e) {
       setError((e as Error).message);

@@ -88,10 +88,35 @@ export async function processSignal(signal: Signal): Promise<void> {
       );
     } else {
       // Fallback: debounce window expired but signal still arriving
-      // Treat as new signal by clearing debounce key
-      await redis.del(debounceKey);
-      // Recursive call to process as first signal
-      return processSignal(signal);
+      // Instead of recursive call (which can overflow stack), create new work item inline
+      const strategy = resolveAlertStrategy(signal.componentType);
+      const ctx = new AlertContext(strategy);
+      const title = ctx.getTitle(signal.componentId, signal.errorCode);
+      const priority = ctx.getPriority();
+
+      const newWorkItem = await withRetry(async () => {
+        const client = await pgPool.connect();
+        try {
+          await client.query('BEGIN');
+          const { rows } = await client.query(
+            `INSERT INTO work_items (component_id, component_type, priority, status, title, signal_count, start_time, updated_at)
+             VALUES ($1, $2, $3, 'OPEN', $4, 1, $5, NOW())
+             RETURNING id`,
+            [signal.componentId, signal.componentType, priority, title, signal.timestamp]
+          );
+          await client.query('COMMIT');
+          return rows[0];
+        } catch (err) {
+          await client.query('ROLLBACK');
+          throw err;
+        } finally {
+          client.release();
+        }
+      });
+
+      await redis.set(wiKey, newWorkItem.id, 'EX', Math.ceil(config.debounceWindowMs / 1000) + 60);
+      ctx.notify(signal.componentId, newWorkItem.id);
+      broadcastUpdate({ type: 'WORK_ITEM_CREATED', workItemId: newWorkItem.id, componentId: signal.componentId, priority });
     }
   }
 

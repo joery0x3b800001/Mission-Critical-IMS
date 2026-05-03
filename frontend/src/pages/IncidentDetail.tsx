@@ -128,19 +128,25 @@ export function IncidentDetailPage() {
   const load = async () => {
     if (!id) return;
     try {
-      const data = await api.getIncident(id);
-      setDetail(data);
-      if (data.rca) {
+      const data = await api.getIncident(id, 0, 50);
+      // Extract incident detail from response
+      const incidentDetail = {
+        workItem: data.workItem || data.workItem,
+        rca: data.rca || data.rca,
+        rawSignals: data.rawSignals || data.rawSignals
+      } as any;
+      setDetail(incidentDetail);
+      if (incidentDetail.rca) {
         setRcaForm({
-          incidentStart: data.rca.incidentStart.slice(0, 16),
-          incidentEnd: data.rca.incidentEnd.slice(0, 16),
-          rootCauseCategory: data.rca.rootCauseCategory,
-          fixApplied: data.rca.fixApplied,
-          preventionSteps: data.rca.preventionSteps,
+          incidentStart: incidentDetail.rca.incidentStart.slice(0, 16),
+          incidentEnd: incidentDetail.rca.incidentEnd.slice(0, 16),
+          rootCauseCategory: incidentDetail.rca.rootCauseCategory,
+          fixApplied: incidentDetail.rca.fixApplied,
+          preventionSteps: incidentDetail.rca.preventionSteps,
         });
         setTouched({ incidentStart: true, incidentEnd: true, fixApplied: true, preventionSteps: true });
-      } else if (data.workItem.startTime) {
-        setRcaForm(f => ({ ...f, incidentStart: data.workItem.startTime.slice(0, 16) }));
+      } else if (incidentDetail.workItem.startTime) {
+        setRcaForm(f => ({ ...f, incidentStart: incidentDetail.workItem.startTime.slice(0, 16) }));
       }
     } catch (e) {
       setActionError((e as Error).message);

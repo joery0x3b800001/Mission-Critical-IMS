@@ -19,8 +19,10 @@ export const signalQueue = new Queue<Signal>('signals', {
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: 'exponential', delay: 500 },
-    removeOnComplete: { count: 1000 },
-    removeOnFail: { count: 500 },
+    // Remove jobs after they're completed or failed to prevent memory accumulation
+    // Uses time-based cleanup (1 hour) instead of count to prevent unbounded memory growth
+    removeOnComplete: { age: 3600 }, // Remove completed jobs after 1 hour
+    removeOnFail: { age: 3600 },     // Remove failed jobs after 1 hour
   },
 });
 
