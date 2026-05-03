@@ -16,8 +16,8 @@ const RcaSchema = z.object({
     'DEPENDENCY_FAILURE', 'CAPACITY', 'NETWORK',
     'SECURITY', 'HUMAN_ERROR', 'UNKNOWN',
   ]),
-  fixApplied: z.string().min(10, 'Fix applied must be at least 10 characters'),
-  preventionSteps: z.string().min(10, 'Prevention steps must be at least 10 characters'),
+  fixApplied: z.string().min(config.rcaMinTextLength, `Fix applied must be at least ${config.rcaMinTextLength} characters`),
+  preventionSteps: z.string().min(config.rcaMinTextLength, `Prevention steps must be at least ${config.rcaMinTextLength} characters`),
 });
 
 const StatusSchema = z.object({
@@ -26,7 +26,7 @@ const StatusSchema = z.object({
 
 export async function incidentRoutes(app: FastifyInstance) {
   // ── Caching helper ─────────────────────────────────────────────────────────────
-  // Cache incidents list for 30 seconds to reduce DB load
+  // Cache incidents list (configurable TTL via INCIDENTS_LIST_CACHE_TTL)
   const getCachedIncidents = async (offset: number, limit: number) => {
     const cacheKey = `incidents:${offset}:${limit}`;
     const cached = await redis.get(cacheKey).catch(() => null);
@@ -52,12 +52,12 @@ export async function incidentRoutes(app: FastifyInstance) {
       pagination: { offset, limit, total, hasMore: offset + rows.length < total }
     };
 
-    // Cache for 30 seconds
-    await redis.setex(cacheKey, 30, JSON.stringify(result)).catch(() => {});
+    // Cache configurable TTL
+    await redis.setex(cacheKey, config.incidentsListCacheTtl, JSON.stringify(result)).catch(() => {});
     return result;
   };
 
-  // Cache incident detail for 60 seconds
+  // Cache incident detail (configurable TTL via INCIDENT_DETAIL_CACHE_TTL)
   const getCachedIncidentDetail = async (id: string, signalOffset: number, signalLimit: number) => {
     const cacheKey = `incident:${id}:${signalOffset}:${signalLimit}`;
     const cached = await redis.get(cacheKey).catch(() => null);
@@ -92,8 +92,8 @@ export async function incidentRoutes(app: FastifyInstance) {
       signalsPagination: { offset: signalOffset, limit: signalLimit, total: totalSignals, hasMore: signalOffset + signals.length < totalSignals }
     };
 
-    // Cache for 60 seconds
-    await redis.setex(cacheKey, 60, JSON.stringify(result)).catch(() => {});
+    // Cache configurable TTL
+    await redis.setex(cacheKey, config.incidentDetailCacheTtl, JSON.stringify(result)).catch(() => {});
     return result;
   };
 

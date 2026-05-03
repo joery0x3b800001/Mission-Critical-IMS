@@ -13,7 +13,7 @@ import { closeMongo } from './db/mongo';
 import { closePostgresPool } from './db/postgres';
 
 async function main() {
-  const app = Fastify({ logger: { level: 'warn' }, bodyLimit: 1_048_576 }); // 1MB — supports batch of 100 signals
+  const app = Fastify({ logger: { level: 'warn' }, bodyLimit: config.bodyLimitBytes }); // Configurable via BODY_LIMIT_BYTES env
 
   // ── Plugins ─────────────────────────────────────────────────────────────────
   await app.register(cors, { origin: '*' });

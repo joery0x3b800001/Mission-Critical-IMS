@@ -3,10 +3,10 @@ import { config } from '../config';
 
 export const pgPool = new Pool({
   connectionString: config.databaseUrl,
-  max: 50,                           // Increased from 20 to handle higher concurrent load (worker concurrency × 2)
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-  statement_timeout: 10_000,         // Kill slow queries after 10s to prevent connection exhaustion
+  max: config.dbPoolMax,             // Configurable pool size (default 50)
+  idleTimeoutMillis: config.dbIdleTimeoutMs,
+  connectionTimeoutMillis: config.dbConnectionTimeoutMs,
+  statement_timeout: config.dbStatementTimeoutMs, // Kill slow queries to prevent connection exhaustion
 });
 
 pgPool.on('error', (err) => {

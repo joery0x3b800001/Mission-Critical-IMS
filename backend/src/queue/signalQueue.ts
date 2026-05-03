@@ -18,12 +18,12 @@ const connection = parseRedisUrl(config.redisUrl);
 export const signalQueue = new Queue<Signal>('signals', {
   connection,
   defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 500 },
+    attempts: config.queueRetryAttempts,
+    backoff: { type: 'exponential', delay: config.queueRetryDelayMs },
     // Remove jobs after they're completed or failed to prevent memory accumulation
-    // Uses time-based cleanup (1 hour) instead of count to prevent unbounded memory growth
-    removeOnComplete: { age: 3600 }, // Remove completed jobs after 1 hour
-    removeOnFail: { age: 3600 },     // Remove failed jobs after 1 hour
+    // Uses time-based cleanup instead of count to prevent unbounded memory growth
+    removeOnComplete: { age: config.queueJobRetentionSeconds }, // Configurable via QUEUE_JOB_RETENTION_SECONDS
+    removeOnFail: { age: config.queueJobRetentionSeconds },     // Configurable via QUEUE_JOB_RETENTION_SECONDS
   },
 });
 

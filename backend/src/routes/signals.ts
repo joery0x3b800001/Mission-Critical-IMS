@@ -26,7 +26,7 @@ const SignalSchema = z.object({
     .number()
     .int()
     .min(0, 'latencyMs must be non-negative')
-    .max(60_000, 'latencyMs must be at most 60000ms')
+    .max(config.maxLatencyMs, `latencyMs must be at most ${config.maxLatencyMs}ms`)
     .optional(),
   metadata: z.record(z.unknown()).optional(),
   timestamp: z
@@ -35,9 +35,9 @@ const SignalSchema = z.object({
     .optional(),
 });
 
-// ── Batch schema — up to 100 signals per request ──────────────────────────────
+// ── Batch schema — up to configurable max signals per request ──────────────────────────────
 const BatchSignalSchema = z.object({
-  signals: z.array(SignalSchema).min(1).max(100),
+  signals: z.array(SignalSchema).min(1).max(config.batchSignalMaxSize),
 });
 
 type Signal = z.infer<typeof SignalSchema>;

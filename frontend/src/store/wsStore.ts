@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { frontendConfig } from '../config';
 
 interface WsStore {
   connected: boolean;
@@ -8,12 +9,13 @@ interface WsStore {
 
 let ws: WebSocket | null = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
 
-// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s (capped at 60s)
+// Exponential backoff: configurable base delay capped at configurable max
 function getReconnectDelay(attempt: number): number {
-  const baseDelay = 1000; // 1 second
-  const delay = Math.min(baseDelay * Math.pow(2, attempt), 60_000); // Cap at 60s
+  const delay = Math.min(
+    frontendConfig.wsBaseReconnectDelayMs * Math.pow(2, attempt),
+    frontendConfig.wsMaxReconnectDelayMs
+  );
   return delay;
 }
 
@@ -22,7 +24,7 @@ export const useWsStore = create<WsStore>((set) => ({
   lastEvent: null,
   connect() {
     if (ws) return;
-    const url = (import.meta.env.VITE_WS_URL ?? 'ws://localhost:3001') + '/ws';
+    const url = frontendConfig.wsUrl + '/ws';
     ws = new WebSocket(url);
 
     ws.onopen = () => {
@@ -33,8 +35,8 @@ export const useWsStore = create<WsStore>((set) => ({
       set({ connected: false });
       ws = null;
       
-      // Exponential backoff reconnection (max 10 attempts, then stop)
-      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      // Exponential backoff reconnection (max attempts configurable, then stop)
+      if (reconnectAttempts < frontendConfig.wsMaxReconnectAttempts) {
         const delay = getReconnectDelay(reconnectAttempts);
         reconnectAttempts++;
         setTimeout(() => useWsStore.getState().connect(), delay);
