@@ -6,6 +6,7 @@ import { redis, Keys } from '../db/redis';
 import { getState } from '../patterns/workItemState';
 import { WorkItemStatus } from '../types';
 import { broadcastUpdate } from '../ws/broadcaster';
+import { config } from '../config';
 
 const RcaSchema = z.object({
   incidentStart: z.string().datetime(),
@@ -24,75 +25,124 @@ const StatusSchema = z.object({
 });
 
 export async function incidentRoutes(app: FastifyInstance) {
-  // GET /incidents — list with pagination support
+  // ── Caching helper ─────────────────────────────────────────────────────────────
+  // Cache incidents list for 30 seconds to reduce DB load
+  const getCachedIncidents = async (offset: number, limit: number) => {
+    const cacheKey = `incidents:${offset}:${limit}`;
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) return JSON.parse(cached);
+
+    // Fetch from database
+    const { rows: countRows } = await pgPool.query(`SELECT COUNT(*) as total FROM work_items`);
+    const total = parseInt(countRows[0].total, 10);
+
+    const { rows } = await pgPool.query(
+      `SELECT w.*, r.root_cause_category
+       FROM work_items w
+       LEFT JOIN rca_records r ON r.work_item_id = w.id
+       ORDER BY
+         CASE priority WHEN 'P0' THEN 1 WHEN 'P1' THEN 2 ELSE 3 END,
+         w.start_time DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    const result = {
+      incidents: rows.map(toWorkItem),
+      pagination: { offset, limit, total, hasMore: offset + rows.length < total }
+    };
+
+    // Cache for 30 seconds
+    await redis.setex(cacheKey, 30, JSON.stringify(result)).catch(() => {});
+    return result;
+  };
+
+  // Cache incident detail for 60 seconds
+  const getCachedIncidentDetail = async (id: string, signalOffset: number, signalLimit: number) => {
+    const cacheKey = `incident:${id}:${signalOffset}:${signalLimit}`;
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) return JSON.parse(cached);
+
+    const { rows } = await pgPool.query(
+      `SELECT w.*, r.id as rca_id, r.incident_start, r.incident_end,
+              r.root_cause_category, r.fix_applied, r.prevention_steps, r.submitted_at
+       FROM work_items w
+       LEFT JOIN rca_records r ON r.work_item_id = w.id
+       WHERE w.id = $1`,
+      [id]
+    );
+    if (!rows[0]) return null;
+
+    // Fetch raw signals from MongoDB with pagination
+    const col = await getRawSignalsCollection();
+    const [signals, totalSignals] = await Promise.all([
+      col
+        .find({ workItemId: id }, { projection: { _id: 0 } })
+        .sort({ ingestedAt: -1 })
+        .skip(signalOffset)
+        .limit(signalLimit)
+        .toArray(),
+      col.countDocuments({ workItemId: id })
+    ]);
+
+    const result = {
+      workItem: toWorkItem(rows[0]),
+      rca: toRca(rows[0]),
+      rawSignals: signals,
+      signalsPagination: { offset: signalOffset, limit: signalLimit, total: totalSignals, hasMore: signalOffset + signals.length < totalSignals }
+    };
+
+    // Cache for 60 seconds
+    await redis.setex(cacheKey, 60, JSON.stringify(result)).catch(() => {});
+    return result;
+  };
+
+  // GET /incidents — list with pagination support and caching
   // Query params: offset (default 0), limit (default 50, max 200)
   app.get('/incidents', async (req, reply) => {
     const offset = Math.max(0, parseInt((req.query as any).offset ?? '0', 10));
     const limit = Math.min(200, Math.max(1, parseInt((req.query as any).limit ?? '50', 10)));
     
     try {
-      // Fetch total count for pagination metadata
-      const { rows: countRows } = await pgPool.query(`SELECT COUNT(*) as total FROM work_items`);
-      const total = parseInt(countRows[0].total, 10);
-      
-      const { rows } = await pgPool.query(
-        `SELECT w.*, r.root_cause_category
-         FROM work_items w
-         LEFT JOIN rca_records r ON r.work_item_id = w.id
-         ORDER BY
-           CASE priority WHEN 'P0' THEN 1 WHEN 'P1' THEN 2 ELSE 3 END,
-           w.start_time DESC
-         LIMIT $1 OFFSET $2`,
-        [limit, offset]
-      );
-      return reply.send({
-        incidents: rows.map(toWorkItem),
-        pagination: { offset, limit, total, hasMore: offset + rows.length < total }
-      });
+      const result = await getCachedIncidents(offset, limit);
+      return reply.send(result);
     } catch (err) {
       return reply.status(500).send({ error: 'Failed to fetch incidents' });
     }
   });
 
-  // GET /incidents/:id — detail with raw signals (paginated)
+  // GET /incidents/:id — detail with raw signals (paginated) and caching
   app.get('/incidents/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const signalOffset = Math.max(0, parseInt((req.query as any).signalOffset ?? '0', 10));
     const signalLimit = Math.min(100, Math.max(1, parseInt((req.query as any).signalLimit ?? '50', 10)));
     
     try {
-      const { rows } = await pgPool.query(
-        `SELECT w.*, r.id as rca_id, r.incident_start, r.incident_end,
-                r.root_cause_category, r.fix_applied, r.prevention_steps, r.submitted_at
-         FROM work_items w
-         LEFT JOIN rca_records r ON r.work_item_id = w.id
-         WHERE w.id = $1`,
-        [id]
-      );
-      if (!rows[0]) return reply.status(404).send({ error: 'Incident not found' });
-
-      // Fetch raw signals from MongoDB with pagination
-      const col = await getRawSignalsCollection();
-      const [signals, totalSignals] = await Promise.all([
-        col
-          .find({ workItemId: id }, { projection: { _id: 0 } })
-          .sort({ ingestedAt: -1 })
-          .skip(signalOffset)
-          .limit(signalLimit)
-          .toArray(),
-        col.countDocuments({ workItemId: id })
-      ]);
-
-      return reply.send({
-        workItem: toWorkItem(rows[0]),
-        rca: toRca(rows[0]),
-        rawSignals: signals,
-        signalsPagination: { offset: signalOffset, limit: signalLimit, total: totalSignals, hasMore: signalOffset + signals.length < totalSignals }
-      });
+      const result = await getCachedIncidentDetail(id, signalOffset, signalLimit);
+      if (!result) return reply.status(404).send({ error: 'Incident not found' });
+      return reply.send(result);
     } catch (err) {
       return reply.status(500).send({ error: 'Failed to fetch incident detail' });
     }
   });
+
+  // ── State mutations invalidate cache ────────────────────────────────────────────
+  // Helper to invalidate all incident caches
+  const invalidateIncidentCaches = async (id?: string) => {
+    // Clear all incidents list caches
+    for (let offset = 0; offset < 1000; offset += 50) {
+      await redis.del(`incidents:${offset}:50`).catch(() => {});
+      await redis.del(`incidents:${offset}:100`).catch(() => {});
+      await redis.del(`incidents:${offset}:200`).catch(() => {});
+    }
+    // Clear specific incident cache if provided
+    if (id) {
+      for (let sigOffset = 0; sigOffset < 1000; sigOffset += 50) {
+        await redis.del(`incident:${id}:${sigOffset}:50`).catch(() => {});
+        await redis.del(`incident:${id}:${sigOffset}:100`).catch(() => {});
+      }
+    }
+  };
 
   // PATCH /incidents/:id/status — state transition
   app.patch('/incidents/:id/status', async (req, reply) => {
@@ -119,8 +169,8 @@ export async function incidentRoutes(app: FastifyInstance) {
 
       await currentState.transitionTo(id, nextStatus, rcaExists);
 
-      // Invalidate dashboard cache
-      await redis.del(Keys.dashboard());
+      // Invalidate caches
+      await invalidateIncidentCaches(id);
 
       broadcastUpdate({ type: 'STATUS_CHANGED', workItemId: id, status: nextStatus });
       return reply.send({ workItemId: id, status: nextStatus });
@@ -163,6 +213,9 @@ export async function incidentRoutes(app: FastifyInstance) {
         )
       );
 
+      // Invalidate caches
+      await invalidateIncidentCaches(id);
+
       broadcastUpdate({ type: 'RCA_SUBMITTED', workItemId: id });
       return reply.status(201).send({ workItemId: id, rcaSubmitted: true });
     } catch (err) {
@@ -170,8 +223,6 @@ export async function incidentRoutes(app: FastifyInstance) {
     }
   });
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function toWorkItem(row: Record<string, unknown>) {
   return {
     id: row.id,
