@@ -154,22 +154,63 @@ Throughput metrics are printed to console every 5 seconds:
 
 ## Prerequisites
 
-- **Docker Desktop** with Docker Compose v2 (includes Compose)
-- **Node.js 22+** — install via `nvm install --lts`
+- **Docker Desktop** with Docker Compose v2
+- **Node.js 22+** — `nvm install --lts`
+- **Python 3.8+** — required for `deploy.py`
+
+---
+
+## ⭐ Recommended: Evaluator Quick Start
+
+This is the fastest path to deploy, test, and simulate the full system end-to-end using `deploy.py`.
+
+**Step 1 — Start all services**
+
+```bash
+cd Mission-Critical-IMS
+python3 deploy.py deploy up
+```
+
+Wait for all 5 containers to be running (check Docker Desktop or run `python3 deploy.py deploy status`).
+
+**Step 2 — Run backend unit tests**
+
+```bash
+python3 deploy.py test backend
+```
+
+Runs the full Jest test suite — state machine, strategy pattern, route validation, integration, and stress tests.
+
+**Step 3 — Run outage simulation**
+
+```bash
+python3 deploy.py test simulate
+```
+
+Fires 640 signals across 5 component types, debounced into Work Items. Open the dashboard at http://localhost:3000 to watch incidents populate in real time.
+
+**Step 4 — Run burst stress test**
+
+```bash
+python3 deploy.py test simulate --mode burst
+```
+
+Fires 50,000 signals over 5 seconds and prints throughput, latency percentiles (p50/p95/p99), and a PASS/FAIL resilience verdict.
+
+**Step 5 — Tear down**
+
+```bash
+python3 deploy.py deploy down --volumes
+```
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Enter the project root
 cd Mission-Critical-IMS
-
-# 2. Start every service (Postgres, MongoDB, Redis, Backend, Frontend)
-docker compose up --build
+python3 deploy.py deploy up
 ```
-
-Wait ~60 seconds for all health checks to pass, then open:
 
 | Service | URL |
 |---|---|
@@ -178,103 +219,154 @@ Wait ~60 seconds for all health checks to pass, then open:
 | Health Check | http://localhost:3001/health |
 | WebSocket | ws://localhost:3001/ws |
 
-### Local Development (faster iteration)
+### Manual — Docker Compose directly
 
 ```bash
-# Start only the databases in Docker
+# Build images and start all services
+docker compose up --build
+
+# Start in background (detached)
+docker compose up --build -d
+
+# Stop and remove containers, keep volumes/data
+docker compose down
+
+# Full reset — remove containers AND wipe all volumes
+docker compose down -v
+```
+
+### Local Development (databases in Docker, app runs locally)
+
+```bash
 docker compose up postgres mongo redis -d
 
-# Backend (hot-reload)
-cd backend && npm install && npm run dev
-
-# Frontend (hot-reload, separate terminal)
-cd frontend && npm install && npm run dev
+cd backend && npm install && npm run dev      # hot-reload backend
+cd frontend && npm install && npm run dev     # hot-reload frontend (new terminal)
 ```
 
 ---
 
-## Simulation Scripts
+## Docker Images — Multi-Stage Builds
 
-### Install script dependencies (one time)
+Both services use multi-stage builds for minimal final image size. No TypeScript compiler, source files, or devDependencies ship in production.
 
-```bash
-cd scripts
-npm install
-```
+**Backend** — 4 stages: `deps` → `builder` (tsc) → `prod-deps` (--omit=dev) → `production` (`node dist/index.js`)
 
-### Outage Scenario — cascading failure across 5 components
+**Frontend** — 3 stages: `deps` → `builder` (vite build) → `production` (nginx:1.27-alpine, ~25 MB, no Node at runtime)
 
-```bash
-npx ts-node simulate-outage.ts
-```
+> Place `Dockerfile.backend` → `backend/Dockerfile` and `Dockerfile.frontend` → `frontend/Dockerfile`
 
-Fires 640 signals across RDBMS, MCP_HOST, CACHE, QUEUE, and NOSQL components in 5 phases. Each component's signals are debounced into a single Work Item. Watch the dashboard populate in real time.
+---
 
-Expected dashboard result:
-- `P0` — POSTGRES_PRIMARY_01, POSTGRES_REPLICA_01, MCP_HOST_GATEWAY_01
-- `P1` — QUEUE_WORKER_POOL_01
-- `P2` — CACHE_CLUSTER_01
+## deploy.py — Command Reference
 
-### Burst Test — 10,000 signals/sec stress test
+Deploying, testing, and logging are fully separated — deploy never runs tests, tests never touch containers.
+
+### Deploy
 
 ```bash
-npx ts-node simulate-outage.ts --burst
+python3 deploy.py deploy up                    # start (development)
+python3 deploy.py deploy up --env staging      # start (staging)
+python3 deploy.py deploy up --env production   # start (production)
+python3 deploy.py deploy stop                  # pause containers, data kept
+python3 deploy.py deploy stop --service api    # pause one service only
+python3 deploy.py deploy down                  # remove containers, data kept
+python3 deploy.py deploy down --volumes        # remove containers + wipe volumes
+python3 deploy.py deploy restart
+python3 deploy.py deploy status
 ```
 
-Fires 50,000 signals over 5 seconds (500 batch requests × 100 signals each) and reports:
-- Achieved throughput (signals/sec)
-- Acceptance vs rate-limited vs failed counts
-- Latency percentiles (p50 / p95 / p99 / max)
-- Crash resilience verdict (PASS if <1% failures)
-- Post-burst health check
+| Command | Containers | Data & Volumes |
+|---|---|---|
+| `stop` | paused | ✅ kept |
+| `down` | removed | ✅ kept |
+| `down --volumes` | removed | ❌ wiped |
 
-### Both scenarios back to back
+### Test
 
 ```bash
-npx ts-node simulate-outage.ts --both
+python3 deploy.py test backend                        # npm test (unit tests)
+python3 deploy.py test frontend                       # npm run build check
+python3 deploy.py test simulate                       # outage simulation (burst)
+python3 deploy.py test simulate --mode both           # burst + baseline
+python3 deploy.py test simulate --duration 30         # custom duration (seconds)
 ```
 
-### Reset all data between runs
+### Logs
 
 ```bash
-chmod +x scripts/reset-data.sh
-./scripts/reset-data.sh
+python3 deploy.py logs                         # backend, last 50 lines
+python3 deploy.py logs --service frontend
+python3 deploy.py logs --tail 200
+python3 deploy.py logs --follow                # live tail  (Ctrl+C to stop)
+python3 deploy.py logs --list                  # list all service names
 ```
-
-Wipes Postgres tables, MongoDB collection, Redis keys, and removes Docker volumes. Prompts for `YES` confirmation before proceeding.
 
 ---
 
 ## Running Tests
 
+### Via deploy.py
+
 ```bash
-cd backend
-npm install
-
-# All tests
-npm test
-
-# With coverage report
-npm run test:coverage
-
-# Specific suite
-npm test -- --testPathPattern=workItemState
-npm test -- --testPathPattern=alertStrategy
-npm test -- --testPathPattern=stress
-
-# Watch mode
-npm run test:watch
+python3 deploy.py test backend     # unit tests
+python3 deploy.py test frontend    # build check
 ```
 
-### Test Suites
+### Directly (without deploy.py)
 
-| File | Coverage | Description |
+```bash
+cd backend && npm install
+npm test                                           # all suites
+npm run test:coverage                              # with coverage
+npm test -- --testPathPattern=workItemState        # single suite
+npm test -- --testPathPattern=alertStrategy
+npm test -- --testPathPattern=stress
+npm run test:watch                                 # watch mode
+```
+
+| Suite | Cases | Coverage |
 |---|---|---|
-| `workItemState.test.ts` | State machine | 18+ cases — all transitions, RCA guard, MTTR calc, rollback |
-| `alertStrategy.test.ts` | Strategy pattern | 20+ cases — P0/P1/P2 assignment, context switching, titles |
-| `signals.test.ts` | Route validation | 25+ cases — schema enforcement, priority queuing, edge cases |
-| `integration.test.ts` | End-to-end flow | 10+ cases — signal → Work Item, debounce, error recovery |
-| `stress.test.ts` | Load scenarios | 8 scenarios — burst, sustained load, mixed types, stability |
+| `workItemState.test.ts` | 18+ | All state transitions, RCA guard, MTTR calc, rollback |
+| `alertStrategy.test.ts` | 20+ | P0/P1/P2 assignment, context switching, titles |
+| `signals.test.ts` | 25+ | Schema enforcement, priority queuing, edge cases |
+| `integration.test.ts` | 10+ | Signal → Work Item, debounce, error recovery |
+| `stress.test.ts` | 8 | Burst, sustained load, mixed types, stability |
+
+---
+
+## Simulation Scripts
+
+```bash
+cd scripts && npm install          # install dependencies once
+```
+
+### Via deploy.py
+
+```bash
+python3 deploy.py test simulate              # cascading outage — 640 signals, 5 components
+python3 deploy.py test simulate --mode burst # burst — 50,000 signals over 5s, p50/p95/p99 report
+python3 deploy.py test simulate --mode both  # both scenarios back to back
+```
+
+### Directly (without deploy.py)
+
+```bash
+cd scripts
+
+npx ts-node simulate-outage.ts               # cascading outage scenario
+npx ts-node simulate-outage.ts --burst       # burst — 50,000 signals over 5s, p50/p95/p99 report
+npx ts-node simulate-outage.ts --both        # both scenarios back to back
+```
+
+```bash
+./scripts/reset-data.sh                      # wipe all data between runs
+```
+
+Expected dashboard after outage simulation:
+- `P0` — POSTGRES_PRIMARY_01, POSTGRES_REPLICA_01, MCP_HOST_GATEWAY_01
+- `P1` — QUEUE_WORKER_POOL_01
+- `P2` — CACHE_CLUSTER_01
 
 ---
 
@@ -420,6 +512,7 @@ curl -H "X-API-Key: your-secret-key" http://localhost:3001/signals ...
 ```
 Mission-Critical-IMS/
 ├── docker-compose.yml
+├── deploy.py                      ← Deployment manager (deploy / test / logs)
 ├── README.md
 ├── SECURITY.md                    ← Security hardening guide
 ├── PERFORMANCE.md                 ← Benchmarks and optimisation
@@ -427,7 +520,7 @@ Mission-Critical-IMS/
 ├── artillery-load-test.yml        ← Artillery load test config
 │
 ├── backend/
-│   ├── Dockerfile
+│   ├── Dockerfile                 ← Multi-stage: tsc build → node:22-alpine runtime
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── db/
@@ -460,7 +553,7 @@ Mission-Critical-IMS/
 │           └── stress.test.ts
 │
 ├── frontend/
-│   ├── Dockerfile
+│   ├── Dockerfile                 ← Multi-stage: vite build → nginx:1.27-alpine runtime
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── vite.config.ts
@@ -492,30 +585,29 @@ Mission-Critical-IMS/
 
 ## Troubleshooting
 
-### Burst test shows `failed=50000` with `status=0`
+### `Could not read package.json` during Docker build
+The builder stage is missing `package.json`. Ensure both Dockerfiles have `COPY package.json package-lock.json ./` before `COPY --from=deps`.
 
-The `/signals/batch` endpoint is not in your running container. Rebuild:
+### Burst test shows `failed=50000` with `status=0`
+The `/signals/batch` endpoint is not in the running container. Rebuild:
 ```bash
-docker compose up --build
+python3 deploy.py deploy down && python3 deploy.py deploy up
 ```
 
 ### `Cannot find name 'process'` when running scripts
-
-Install `@types/node` inside the scripts folder:
 ```bash
 cd scripts && npm install
 ```
 
-### Containers fail health checks on startup
-
-Wait 60 seconds — TimescaleDB takes longer to initialise than standard Postgres. If it persists:
+### Frontend shows no incidents after simulation
+The debounce window is 10 seconds. Running the simulation twice within 10 seconds for the same `componentId` creates no new Work Items (by design). Reset between runs:
 ```bash
-docker compose down -v   # removes volumes
-docker compose up --build
+./scripts/reset-data.sh
 ```
 
-### Frontend shows no incidents after simulation
-
-The debounce window is 10 seconds. If you run the simulation script twice within 10 seconds for the same `componentId`, the second run creates no new Work Items (by design). Run `reset-data.sh` between runs.
-
----
+### Container stuck or unhealthy
+```bash
+python3 deploy.py deploy stop
+python3 deploy.py deploy down --volumes    # only if a clean slate is needed
+python3 deploy.py deploy up
+```
