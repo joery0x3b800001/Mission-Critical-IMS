@@ -1,63 +1,46 @@
 import { ComponentType, Priority } from '../types';
 
-// ── Strategy Interface ────────────────────────────────────────────────────────
+// ── Alert Strategy Interface & Implementations ────────────────────────────────
 export interface AlertStrategy {
   getPriority(): Priority;
   getTitle(componentId: string, errorCode: string): string;
   notify(componentId: string, workItemId: string): void;
 }
 
-// ── Concrete Strategies ───────────────────────────────────────────────────────
-export class P0AlertStrategy implements AlertStrategy {
-  getPriority(): Priority { return 'P0'; }
+// ── Priority-based alert strategies (factory pattern for component types) ────
+const alertStrategies: Record<Priority, { new(): AlertStrategy }> = {
+  P0: class P0AlertStrategy implements AlertStrategy {
+    getPriority(): Priority { return 'P0'; }
+    getTitle(componentId: string, errorCode: string): string {
+      return `[P0 CRITICAL] ${componentId} failure — ${errorCode}`;
+    }
+    notify(componentId: string, workItemId: string): void {
+      console.error(`🔴 [P0 ALERT] CRITICAL: ${componentId} | WorkItem: ${workItemId} — Paging on-call engineer!`);
+    }
+  },
+  P1: class P1AlertStrategy implements AlertStrategy {
+    getPriority(): Priority { return 'P1'; }
+    getTitle(componentId: string, errorCode: string): string {
+      return `[P1 HIGH] ${componentId} degraded — ${errorCode}`;
+    }
+    notify(componentId: string, workItemId: string): void {
+      console.warn(`🟠 [P1 ALERT] HIGH: ${componentId} | WorkItem: ${workItemId} — Notifying team channel`);
+    }
+  },
+  P2: class P2AlertStrategy implements AlertStrategy {
+    getPriority(): Priority { return 'P2'; }
+    getTitle(componentId: string, errorCode: string): string {
+      return `[P2 MEDIUM] ${componentId} issue — ${errorCode}`;
+    }
+    notify(componentId: string, workItemId: string): void {
+      console.info(`🟡 [P2 ALERT] MEDIUM: ${componentId} | WorkItem: ${workItemId} — Creating ticket`);
+    }
+  },
+};
 
-  getTitle(componentId: string, errorCode: string): string {
-    return `[P0 CRITICAL] ${componentId} failure — ${errorCode}`;
-  }
-
-  notify(componentId: string, workItemId: string): void {
-    // In production: page on-call via PagerDuty / OpsGenie
-    console.error(`🔴 [P0 ALERT] CRITICAL: ${componentId} | WorkItem: ${workItemId} — Paging on-call engineer!`);
-  }
-}
-
-export class P1AlertStrategy implements AlertStrategy {
-  getPriority(): Priority { return 'P1'; }
-
-  getTitle(componentId: string, errorCode: string): string {
-    return `[P1 HIGH] ${componentId} degraded — ${errorCode}`;
-  }
-
-  notify(componentId: string, workItemId: string): void {
-    // In production: Slack #incidents channel
-    console.warn(`🟠 [P1 ALERT] HIGH: ${componentId} | WorkItem: ${workItemId} — Notifying team channel`);
-  }
-}
-
-export class P2AlertStrategy implements AlertStrategy {
-  getPriority(): Priority { return 'P2'; }
-
-  getTitle(componentId: string, errorCode: string): string {
-    return `[P2 MEDIUM] ${componentId} issue — ${errorCode}`;
-  }
-
-  notify(componentId: string, workItemId: string): void {
-    // In production: create Jira ticket
-    console.info(`🟡 [P2 ALERT] MEDIUM: ${componentId} | WorkItem: ${workItemId} — Creating ticket`);
-  }
-}
-
-// ── Context ───────────────────────────────────────────────────────────────────
+// ── Alert Context: Encapsulates strategy execution ────────────────────────────
 export class AlertContext {
-  private strategy: AlertStrategy;
-
-  constructor(strategy: AlertStrategy) {
-    this.strategy = strategy;
-  }
-
-  setStrategy(strategy: AlertStrategy): void {
-    this.strategy = strategy;
-  }
+  constructor(private strategy: AlertStrategy) {}
 
   getPriority(): Priority { return this.strategy.getPriority(); }
   getTitle(componentId: string, errorCode: string): string {
@@ -68,19 +51,16 @@ export class AlertContext {
   }
 }
 
-// ── Factory: pick strategy by component type ──────────────────────────────────
+// ── Factory: Resolve alert strategy by component type ────────────────────────
 export function resolveAlertStrategy(componentType: ComponentType): AlertStrategy {
-  switch (componentType) {
-    case 'RDBMS':
-    case 'MCP_HOST':
-      return new P0AlertStrategy();
-    case 'API':
-    case 'QUEUE':
-      return new P1AlertStrategy();
-    case 'CACHE':
-    case 'NOSQL':
-      return new P2AlertStrategy();
-    default:
-      return new P1AlertStrategy();
-  }
+  const priorityMap: Record<ComponentType, Priority> = {
+    RDBMS: 'P0',
+    MCP_HOST: 'P0',
+    API: 'P1',
+    QUEUE: 'P1',
+    CACHE: 'P2',
+    NOSQL: 'P2',
+  };
+  const priority = priorityMap[componentType] ?? 'P1';
+  return new alertStrategies[priority]();
 }

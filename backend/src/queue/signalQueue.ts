@@ -3,14 +3,15 @@ import { config } from '../config';
 import { processSignal } from './signalProcessor';
 import { Signal } from '../types';
 
-function parseRedisUrl(url: string): { host: string; port: number } {
+// ── Helper: Parse Redis URL to connection config ─────────────────────────────
+const parseRedisUrl = (url: string): { host: string; port: number } => {
   try {
     const u = new URL(url);
     return { host: u.hostname || 'redis', port: parseInt(u.port || '6379', 10) };
   } catch {
     return { host: 'redis', port: 6379 };
   }
-}
+};
 
 const connection = parseRedisUrl(config.redisUrl);
 

@@ -223,25 +223,24 @@ export async function incidentRoutes(app: FastifyInstance) {
     }
   });
 }
-function toWorkItem(row: Record<string, unknown>) {
-  return {
-    id: row.id,
-    componentId: row.component_id,
-    componentType: row.component_type,
-    priority: row.priority,
-    status: row.status,
-    title: row.title,
-    signalCount: row.signal_count,
-    startTime: row.start_time,
-    updatedAt: row.updated_at,
-    closedAt: row.closed_at ?? null,
-    mttrSeconds: row.mttr_seconds ?? null,
-  };
-}
 
-function toRca(row: Record<string, unknown>) {
-  if (!row.rca_id) return null;
-  return {
+// ── Row transformers: Convert DB records to API response types ───────────────
+const toWorkItem = (row: Record<string, unknown>) => ({
+  id: row.id,
+  componentId: row.component_id,
+  componentType: row.component_type,
+  priority: row.priority,
+  status: row.status,
+  title: row.title,
+  signalCount: row.signal_count,
+  startTime: row.start_time,
+  updatedAt: row.updated_at,
+  closedAt: row.closed_at ?? null,
+  mttrSeconds: row.mttr_seconds ?? null,
+});
+
+const toRca = (row: Record<string, unknown>) =>
+  !row.rca_id ? null : {
     id: row.rca_id,
     workItemId: row.id,
     incidentStart: row.incident_start,
@@ -251,4 +250,3 @@ function toRca(row: Record<string, unknown>) {
     preventionSteps: row.prevention_steps,
     submittedAt: row.submitted_at,
   };
-}

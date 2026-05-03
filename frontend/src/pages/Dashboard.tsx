@@ -61,7 +61,7 @@ export function Dashboard() {
   const connected = useWsStore((s) => s.connected);
 
   // Debounce timer for refetch
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track if we need to refetch after current debounce
   const shouldRefetchRef = useRef(false);
 

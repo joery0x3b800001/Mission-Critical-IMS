@@ -225,7 +225,7 @@ describe('WorkItemState Pattern', () => {
     });
 
     it('should throw for unknown status', () => {
-      expect(() => getState('INVALID' as any)).toThrow('Unknown status: INVALID');
+      expect(() => getState('INVALID' as any)).toThrow('Unknown work item status: INVALID');
     });
   });
 

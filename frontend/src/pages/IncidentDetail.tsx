@@ -31,12 +31,10 @@ interface RcaValidation {
   formReady: boolean;
 }
 
-// ── Pure validation hook ─────────────────────────────────────────────────────
-// endInFuture intentionally removed — incidents always happened in the past,
-// and the input min/max attributes handle picker-level enforcement.
+// ── Pure validation hook: All RCA form validation logic in one place ─────────
 function useRcaValidation(
   form: { incidentStart: string; incidentEnd: string; fixApplied: string; preventionSteps: string },
-  workItemStartTime: string,
+  _workItemStartTime: string,
 ): RcaValidation {
   return useMemo(() => {
     const startDate = form.incidentStart ? new Date(form.incidentStart) : null;
@@ -44,46 +42,40 @@ function useRcaValidation(
 
     const startMissing = !startDate || !isValid(startDate);
     const endMissing = !endDate || !isValid(endDate);
-
     const endBeforeStart = !startMissing && !endMissing && endDate! <= startDate!;
-    const endBeforeCreated = false;
-
-    const endInvalid = endMissing || endBeforeStart || endBeforeCreated;
+    const endInvalid = endMissing || endBeforeStart;
 
     let endErrorMsg: string | null = null;
     if (endMissing) endErrorMsg = 'End date is required';
     else if (endBeforeStart) endErrorMsg = 'End must be after start';
-    else if (endBeforeCreated) endErrorMsg = 'End cannot be before incident was created';
 
-    const durationSeconds =
-      !startMissing && !endInvalid
-        ? differenceInSeconds(endDate!, startDate!)
-        : null;
+    const durationSeconds = !startMissing && !endInvalid
+      ? differenceInSeconds(endDate!, startDate!)
+      : null;
 
     const fixTooShort = form.fixApplied.trim().length < 10;
     const preventionTooShort = form.preventionSteps.trim().length < 10;
-
     const formReady = !startMissing && !endInvalid && !fixTooShort && !preventionTooShort;
 
     return {
       startMissing, endMissing, endBeforeStart,
-      endBeforeCreated, durationSeconds, endInvalid, endErrorMsg,
+      endBeforeCreated: false, durationSeconds, endInvalid, endErrorMsg,
       fixTooShort, preventionTooShort, formReady,
     };
-  }, [form.incidentStart, form.incidentEnd, form.fixApplied, form.preventionSteps, workItemStartTime]);
+  }, [form.incidentStart, form.incidentEnd, form.fixApplied, form.preventionSteps]);
 }
 
-// ── Duration pretty-printer ──────────────────────────────────────────────────
-function formatDuration(seconds: number): string {
+// ── Duration formatter: Convert seconds to human-readable format ──────────────
+const formatDuration = (seconds: number): string => {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   return `${h}h ${m}m`;
-}
+};
 
-// ── Live character-count badge ───────────────────────────────────────────────
-function CharCount({ value, min }: { value: string; min: number }) {
+// ── Character count badge: Real-time validation feedback ────────────────────
+const CharCount = ({ value, min }: { value: string; min: number }) => {
   const len = value.trim().length;
   const color = len >= min ? 'text-ok' : len > 0 ? 'text-warn' : 'text-muted';
   return (
@@ -91,7 +83,7 @@ function CharCount({ value, min }: { value: string; min: number }) {
       {len}/{min} min
     </span>
   );
-}
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 export function IncidentDetailPage() {

@@ -1,22 +1,19 @@
 import {
-  P0AlertStrategy,
-  P1AlertStrategy,
-  P2AlertStrategy,
   AlertContext,
   resolveAlertStrategy,
 } from '../patterns/alertStrategy';
 import { ComponentType } from '../types';
 
 describe('AlertStrategy Pattern', () => {
-  // ── P0AlertStrategy Tests ────────────────────────────────────────────────────
-  describe('P0AlertStrategy', () => {
+  // ── P0 Priority Strategy Tests ───────────────────────────────────────────────
+  describe('P0 Priority Strategy (RDBMS, MCP_HOST)', () => {
     it('should return P0 priority', () => {
-      const strategy = new P0AlertStrategy();
+      const strategy = resolveAlertStrategy('RDBMS');
       expect(strategy.getPriority()).toBe('P0');
     });
 
     it('should format P0 critical title with componentId and errorCode', () => {
-      const strategy = new P0AlertStrategy();
+      const strategy = resolveAlertStrategy('RDBMS');
       const title = strategy.getTitle('postgres-primary', 'DB_CONNECTION_TIMEOUT');
       expect(title).toContain('[P0 CRITICAL]');
       expect(title).toContain('postgres-primary');
@@ -25,7 +22,7 @@ describe('AlertStrategy Pattern', () => {
 
     it('should log P0 alert notification', () => {
       const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-      const strategy = new P0AlertStrategy();
+      const strategy = resolveAlertStrategy('MCP_HOST');
       strategy.notify('redis-cluster', 'work-item-123');
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('🔴 [P0 ALERT]')
@@ -37,15 +34,15 @@ describe('AlertStrategy Pattern', () => {
     });
   });
 
-  // ── P1AlertStrategy Tests ────────────────────────────────────────────────────
-  describe('P1AlertStrategy', () => {
+  // ── P1 Priority Strategy Tests ───────────────────────────────────────────────
+  describe('P1 Priority Strategy (API, QUEUE)', () => {
     it('should return P1 priority', () => {
-      const strategy = new P1AlertStrategy();
+      const strategy = resolveAlertStrategy('API');
       expect(strategy.getPriority()).toBe('P1');
     });
 
     it('should format P1 high title with componentId and errorCode', () => {
-      const strategy = new P1AlertStrategy();
+      const strategy = resolveAlertStrategy('QUEUE');
       const title = strategy.getTitle('api-gateway', 'HIGH_LATENCY');
       expect(title).toContain('[P1 HIGH]');
       expect(title).toContain('api-gateway');
@@ -54,7 +51,7 @@ describe('AlertStrategy Pattern', () => {
 
     it('should log P1 alert notification', () => {
       const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      const strategy = new P1AlertStrategy();
+      const strategy = resolveAlertStrategy('API');
       strategy.notify('api-gateway', 'work-item-456');
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('🟠 [P1 ALERT]')
@@ -63,15 +60,15 @@ describe('AlertStrategy Pattern', () => {
     });
   });
 
-  // ── P2AlertStrategy Tests ────────────────────────────────────────────────────
-  describe('P2AlertStrategy', () => {
+  // ── P2 Priority Strategy Tests ───────────────────────────────────────────────
+  describe('P2 Priority Strategy (CACHE, NOSQL)', () => {
     it('should return P2 priority', () => {
-      const strategy = new P2AlertStrategy();
+      const strategy = resolveAlertStrategy('CACHE');
       expect(strategy.getPriority()).toBe('P2');
     });
 
     it('should format P2 medium title with componentId and errorCode', () => {
-      const strategy = new P2AlertStrategy();
+      const strategy = resolveAlertStrategy('NOSQL');
       const title = strategy.getTitle('cache-server', 'MEMORY_USAGE_HIGH');
       expect(title).toContain('[P2 MEDIUM]');
       expect(title).toContain('cache-server');
@@ -80,7 +77,7 @@ describe('AlertStrategy Pattern', () => {
 
     it('should log P2 alert notification', () => {
       const consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
-      const strategy = new P2AlertStrategy();
+      const strategy = resolveAlertStrategy('CACHE');
       strategy.notify('cache-server', 'work-item-789');
       expect(consoleInfoSpy).toHaveBeenCalledWith(
         expect.stringContaining('🟡 [P2 ALERT]')
@@ -92,34 +89,20 @@ describe('AlertStrategy Pattern', () => {
   // ── AlertContext Tests ───────────────────────────────────────────────────────
   describe('AlertContext', () => {
     it('should initialize with a strategy', () => {
-      const strategy = new P0AlertStrategy();
+      const strategy = resolveAlertStrategy('RDBMS');
       const context = new AlertContext(strategy);
       expect(context.getPriority()).toBe('P0');
     });
 
-    it('should switch strategies dynamically', () => {
-      const p0 = new P0AlertStrategy();
-      const p1 = new P1AlertStrategy();
-      const context = new AlertContext(p0);
-
-      expect(context.getPriority()).toBe('P0');
-      context.setStrategy(p1);
-      expect(context.getPriority()).toBe('P1');
-    });
-
-    it('should delegate title generation to current strategy', () => {
-      const context = new AlertContext(new P0AlertStrategy());
+    it('should delegate title generation to strategy', () => {
+      const context = new AlertContext(resolveAlertStrategy('RDBMS'));
       const title = context.getTitle('db-primary', 'CRASH');
       expect(title).toContain('[P0 CRITICAL]');
-
-      context.setStrategy(new P2AlertStrategy());
-      const p2Title = context.getTitle('db-primary', 'CRASH');
-      expect(p2Title).toContain('[P2 MEDIUM]');
     });
 
-    it('should delegate notify to current strategy', () => {
+    it('should delegate notify to strategy', () => {
       const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-      const context = new AlertContext(new P0AlertStrategy());
+      const context = new AlertContext(resolveAlertStrategy('RDBMS'));
       context.notify('component', 'wi-123');
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('🔴 [P0 ALERT]')
@@ -129,7 +112,7 @@ describe('AlertStrategy Pattern', () => {
   });
 
   // ── Strategy Resolution Tests ────────────────────────────────────────────────
-  describe('resolveAlertStrategy', () => {
+  describe('resolveAlertStrategy Factory', () => {
     it('should resolve RDBMS to P0 strategy', () => {
       const strategy = resolveAlertStrategy('RDBMS');
       expect(strategy.getPriority()).toBe('P0');
@@ -173,39 +156,41 @@ describe('AlertStrategy Pattern', () => {
     });
   });
 
-  // ── Integration: Strategy + Context ──────────────────────────────────────────
+  // ── Integration Tests ────────────────────────────────────────────────────────
   describe('AlertContext + Strategy Integration', () => {
-    it('should handle multi-component incident escalation', () => {
-      const context = new AlertContext(new P2AlertStrategy());
+    it('should use factory-resolved strategies through context', () => {
+      const p2Strategy = resolveAlertStrategy('CACHE');
+      const context = new AlertContext(p2Strategy);
       const consoleSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
 
-      // Start as P2
+      // P2 alert should log to info
       context.notify('app-cache', 'wi-001');
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('🟡 [P2 ALERT]'));
 
-      // Escalate to P0 when RDBMS also fails
-      context.setStrategy(new P0AlertStrategy());
-      consoleSpy.mockClear();
-      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-      context.notify('postgres', 'wi-002');
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('🔴 [P0 ALERT]'));
-
       consoleSpy.mockRestore();
-      errorSpy.mockRestore();
     });
 
-    it('should format consistent titles across strategies', () => {
+    it('should format consistent titles across all priority levels', () => {
       const componentId = 'payment-api';
       const errorCode = 'TIMEOUT_500MS';
       
-      const title0 = new P0AlertStrategy().getTitle(componentId, errorCode);
-      const title1 = new P1AlertStrategy().getTitle(componentId, errorCode);
-      const title2 = new P2AlertStrategy().getTitle(componentId, errorCode);
+      const p0Strategy = resolveAlertStrategy('RDBMS');
+      const p1Strategy = resolveAlertStrategy('API');
+      const p2Strategy = resolveAlertStrategy('CACHE');
 
+      const title0 = p0Strategy.getTitle(componentId, errorCode);
+      const title1 = p1Strategy.getTitle(componentId, errorCode);
+      const title2 = p2Strategy.getTitle(componentId, errorCode);
+
+      expect(title0).toContain('[P0 CRITICAL]');
       expect(title0).toContain(componentId);
       expect(title0).toContain(errorCode);
+      
+      expect(title1).toContain('[P1 HIGH]');
       expect(title1).toContain(componentId);
       expect(title1).toContain(errorCode);
+      
+      expect(title2).toContain('[P2 MEDIUM]');
       expect(title2).toContain(componentId);
       expect(title2).toContain(errorCode);
     });
