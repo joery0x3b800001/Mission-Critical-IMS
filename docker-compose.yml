@@ -55,16 +55,45 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: production         # ← only the final slim stage is used
     container_name: ims_backend
     restart: unless-stopped
     ports:
       - '3001:3001'
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       PORT: 3001
       DATABASE_URL: postgresql://ims_user:ims_pass@postgres:5432/ims_db
       MONGO_URL: mongodb://ims_user:ims_pass@mongo:27017/ims_signals?authSource=admin
       REDIS_URL: redis://redis:6379
+      # ─ HTTP & Request Handling ──────────────────────────────────────────
+      BODY_LIMIT_BYTES: ${BODY_LIMIT_BYTES:-1048576}
+      BATCH_SIGNAL_MAX_SIZE: ${BATCH_SIGNAL_MAX_SIZE:-100}
+      # ─ Rate Limiting ────────────────────────────────────────────────────
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-10000}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-10000}
+      PER_IP_RATE_LIMIT_MAX: ${PER_IP_RATE_LIMIT_MAX:-1000}
+      PER_IP_RATE_LIMIT_WINDOW_MS: ${PER_IP_RATE_LIMIT_WINDOW_MS:-60000}
+      # ─ Debouncing & Queueing ────────────────────────────────────────────
+      DEBOUNCE_WINDOW_MS: ${DEBOUNCE_WINDOW_MS:-10000}
+      QUEUE_RETRY_ATTEMPTS: ${QUEUE_RETRY_ATTEMPTS:-3}
+      QUEUE_RETRY_DELAY_MS: ${QUEUE_RETRY_DELAY_MS:-500}
+      QUEUE_JOB_RETENTION_SECONDS: ${QUEUE_JOB_RETENTION_SECONDS:-3600}
+      # ─ Worker & Concurrency ─────────────────────────────────────────────
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-}
+      METRICS_INTERVAL_MS: ${METRICS_INTERVAL_MS:-5000}
+      # ─ Pagination & Caching ─────────────────────────────────────────────
+      DEFAULT_INCIDENTS_LIMIT: ${DEFAULT_INCIDENTS_LIMIT:-50}
+      MAX_INCIDENTS_LIMIT: ${MAX_INCIDENTS_LIMIT:-200}
+      DEFAULT_SIGNALS_LIMIT: ${DEFAULT_SIGNALS_LIMIT:-50}
+      MAX_SIGNALS_LIMIT: ${MAX_SIGNALS_LIMIT:-100}
+      INCIDENTS_LIST_CACHE_TTL: ${INCIDENTS_LIST_CACHE_TTL:-30}
+      INCIDENT_DETAIL_CACHE_TTL: ${INCIDENT_DETAIL_CACHE_TTL:-60}
+      # ─ Database Connection Pool ──────────────────────────────────────────
+      DB_POOL_MAX: ${DB_POOL_MAX:-50}
+      DB_IDLE_TIMEOUT_MS: ${DB_IDLE_TIMEOUT_MS:-30000}
+      DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-5000}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-10000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,26 +101,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
+    # No source volume mounts — the image IS the build artifact
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: production         # ← nginx image, no Node at runtime
     container_name: ims_frontend
     restart: unless-stopped
     ports:
       - '3000:3000'
     environment:
+      # These are baked into the JS bundle at build time by Vite.
+      # To change them you must rebuild the image.
       VITE_API_URL: http://localhost:3001
       VITE_WS_URL: ws://localhost:3001
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    # No source volume mounts — nginx serves /usr/share/nginx/html
 
 volumes:
   postgres_data:
