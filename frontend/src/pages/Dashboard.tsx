@@ -147,12 +147,16 @@ export function Dashboard() {
     };
   }, []);
 
-  // Memoize computed values to prevent unnecessary recalculations
-  const { activeCount, p0Count, totalCount } = useMemo(() => ({
-    activeCount: incidents.filter(i => i.status !== 'CLOSED').length,
-    p0Count: incidents.filter(i => i.priority === 'P0' && i.status !== 'CLOSED').length,
-    totalCount: incidents.length,
-  }), [incidents]);
+  // Memoize computed values to prevent unnecessary recalculations (single pass instead of triple filter)
+  const { activeCount, p0Count, totalCount } = useMemo(() => {
+    let active = 0;
+    let p0 = 0;
+    for (const i of incidents) {
+      if (i.status !== 'CLOSED') active++;
+      if (i.priority === 'P0' && i.status !== 'CLOSED') p0++;
+    }
+    return { activeCount: active, p0Count: p0, totalCount: incidents.length };
+  }, [incidents]);
 
   return (
     <div className="min-h-screen bg-bg">

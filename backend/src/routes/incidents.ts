@@ -162,19 +162,16 @@ export async function incidentRoutes(app: FastifyInstance) {
     const nextStatus = parsed.data.status as WorkItemStatus;
 
     try {
-      const { rows } = await pgPool.query(`SELECT status FROM work_items WHERE id = $1`, [id]);
+      // Optimize: Combine work item status and RCA check into single query
+      const { rows } = await pgPool.query(
+        `SELECT w.status, EXISTS(SELECT 1 FROM rca_records WHERE work_item_id = w.id) as has_rca
+         FROM work_items w WHERE w.id = $1`,
+        [id]
+      );
       if (!rows[0]) return reply.status(404).send({ error: 'Incident not found' });
 
       const currentState = getState(rows[0].status as WorkItemStatus);
-
-      // Check RCA if closing
-      let rcaExists = false;
-      if (nextStatus === 'CLOSED') {
-        const { rows: rcaRows } = await pgPool.query(
-          `SELECT id FROM rca_records WHERE work_item_id = $1`, [id]
-        );
-        rcaExists = rcaRows.length > 0;
-      }
+      const rcaExists = nextStatus === 'CLOSED' ? rows[0].has_rca : false;
 
       await currentState.transitionTo(id, nextStatus, rcaExists);
 
@@ -198,7 +195,10 @@ export async function incidentRoutes(app: FastifyInstance) {
 
     const { incidentStart, incidentEnd, rootCauseCategory, fixApplied, preventionSteps } = parsed.data;
 
-    if (new Date(incidentEnd) <= new Date(incidentStart)) {
+    // Optimize: Parse dates once and compare
+    const startDate = new Date(incidentStart);
+    const endDate = new Date(incidentEnd);
+    if (endDate <= startDate) {
       return reply.status(400).send({ error: 'incident_end must be after incident_start' });
     }
 

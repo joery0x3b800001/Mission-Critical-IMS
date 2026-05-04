@@ -1,6 +1,8 @@
+import { memo } from 'react';
 import { Priority, WorkItemStatus } from '../types';
 
-export function PriorityBadge({ priority }: { priority: Priority }) {
+// Memoize badge components to prevent unnecessary re-renders in lists
+export const PriorityBadge = memo(function PriorityBadge({ priority }: { priority: Priority }) {
   const styles: Record<Priority, string> = {
     P0: 'bg-red-900/40 text-red-400 border border-red-700/50',
     P1: 'bg-orange-900/40 text-orange-400 border border-orange-700/50',
@@ -11,9 +13,9 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
       {priority}
     </span>
   );
-}
+});
 
-export function StatusBadge({ status }: { status: WorkItemStatus }) {
+export const StatusBadge = memo(function StatusBadge({ status }: { status: WorkItemStatus }) {
   const styles: Record<WorkItemStatus, string> = {
     OPEN: 'bg-red-900/30 text-red-300 border border-red-800/50',
     INVESTIGATING: 'bg-blue-900/30 text-blue-300 border border-blue-800/50',
@@ -25,4 +27,4 @@ export function StatusBadge({ status }: { status: WorkItemStatus }) {
       {status}
     </span>
   );
-}
+});
