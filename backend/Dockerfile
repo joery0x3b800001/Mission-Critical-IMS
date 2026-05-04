@@ -1,4 +1,16 @@
 # ─────────────────────────────────────────────────────────────────────────────
+# Stage 0 — lockfile
+#   Generate package-lock.json inside Docker, no host lockfile needed.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS lockfile
+
+WORKDIR /app
+
+COPY package.json ./
+
+RUN npm install --package-lock-only
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Stage 1 — deps
 #   Install ALL dependencies (including devDeps needed for tsc).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -6,7 +18,8 @@ FROM node:22-alpine AS deps
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY package.json ./
+COPY --from=lockfile /app/package-lock.json ./
 
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline
@@ -20,7 +33,8 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # ✅ package.json must be here so npm run build resolves the script
-COPY package.json package-lock.json ./
+COPY package.json ./
+COPY --from=lockfile /app/package-lock.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY tsconfig.json ./
 COPY src ./src
@@ -35,7 +49,8 @@ FROM node:22-alpine AS prod-deps
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
+COPY package.json ./
+COPY --from=lockfile /app/package-lock.json ./
 
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --prefer-offline
