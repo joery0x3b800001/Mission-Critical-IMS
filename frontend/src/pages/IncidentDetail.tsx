@@ -181,7 +181,7 @@ export function IncidentDetailPage() {
         incidentEnd: new Date(rcaForm.incidentEnd).toISOString(),
       });
       setRcaSuccess(true);
-      setTimeout(() => setRcaSuccess(false), 3000);
+      // Timer will be cleaned up by useEffect below
       await load();
     } catch (e) {
       setRcaError((e as Error).message);

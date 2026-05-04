@@ -7,12 +7,18 @@ let indexesInitialized = false;
 export async function getMongoClient(): Promise<MongoClient> {
   if (!client) {
     client = new MongoClient(config.mongoUrl);
-    await client.connect();
-    console.log('[MongoDB] Connected');
+    try {
+      await client.connect();
+      console.log('[MongoDB] Connected');
 
-    // Initialize indexes once at startup
-    if (!indexesInitialized) {
-      await initializeIndexes();
+      // Initialize indexes once at startup
+      if (!indexesInitialized) {
+        await initializeIndexes();
+      }
+    } catch (err) {
+      client = null as any;
+      console.error('[MongoDB] Connection failed:', (err as Error).message);
+      throw err;
     }
   }
   return client;

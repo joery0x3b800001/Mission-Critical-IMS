@@ -16,7 +16,6 @@ export function registerClient(ws: WebSocket): void {
 export function broadcastUpdate(payload: Record<string, unknown>): void {
   // Pre-serialize message once instead of in every loop iteration (memory optimization)
   let message: string | null = null;
-  const deadClients: WebSocket[] = [];
 
   for (const client of clients) {
     try {
@@ -26,18 +25,14 @@ export function broadcastUpdate(payload: Record<string, unknown>): void {
         if (!message) message = JSON.stringify(payload);
         client.send(message);
       } else if (client.readyState !== WebSocket.CONNECTING) {
-        // Mark for removal if not open or connecting
-        deadClients.push(client);
+        // Remove dead connections immediately (memory efficiency)
+        clients.delete(client);
       }
     } catch (err) {
       console.error('[Broadcaster] Failed to send to client:', (err as Error).message);
-      deadClients.push(client);
+      // Remove failed client immediately
+      clients.delete(client);
     }
-  }
-
-  // Clean up dead connections
-  for (const client of deadClients) {
-    clients.delete(client);
   }
 }
 

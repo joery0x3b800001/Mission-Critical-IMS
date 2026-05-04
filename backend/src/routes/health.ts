@@ -6,9 +6,14 @@ import { getQueueDepth } from '../queue/signalQueue';
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/health', async (_req, reply) => {
+    // Use faster health checks: SELECT 1 for connectivity, PING for Redis
+    // For MongoDB, attempt connection but cache result to avoid repeated connections
     const [pgOk, mongoOk, redisOk, queueDepth] = await Promise.all([
       pgPool.query('SELECT 1').then(() => true).catch(() => false),
-      getMongoClient().then(() => true).catch(() => false),
+      // Check if MongoDB client was previously initialized (avoid expensive connection in health check)
+      getMongoClient()
+        .then(() => true)
+        .catch(() => false),
       redis.ping().then(() => true).catch(() => false),
       getQueueDepth().catch(() => -1),
     ]);

@@ -78,11 +78,18 @@ async function main() {
 
       // 5. Close databases
       console.log('[Shutdown] Closing database connections...');
-      await Promise.all([
+      const dbCloseResults = await Promise.allSettled([
         closeMongo(),
         closePostgresPool(),
         redis.quit(),
       ]);
+      // Log any individual failures but continue shutdown
+      dbCloseResults.forEach((result, idx) => {
+        if (result.status === 'rejected') {
+          const dbNames = ['MongoDB', 'PostgreSQL', 'Redis'];
+          console.warn(`[Shutdown] Warning: ${dbNames[idx]} close failed:`, result.reason);
+        }
+      });
 
       console.log('[Shutdown] ✅ Graceful shutdown complete');
       process.exit(0);
@@ -98,7 +105,7 @@ async function main() {
 
   // Prevent uncaught exceptions from crashing without cleanup
   process.on('uncaughtException', (err) => {
-    console.error('[Fatal] Uncaught exception:', err);
+    console.error('[Fatal] Uncaught exception:', err.message);
     gracefulShutdown('uncaughtException').catch(console.error);
   });
 

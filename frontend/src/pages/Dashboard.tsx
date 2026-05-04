@@ -88,11 +88,11 @@ export function Dashboard() {
     }
 
     debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null; // Clear immediately to prevent stale references
       if (shouldRefetchRef.current) {
         fetchIncidents();
         shouldRefetchRef.current = false;
       }
-      debounceTimerRef.current = null;
     }, REFETCH_DEBOUNCE_MS);
   }, [fetchIncidents]);
 

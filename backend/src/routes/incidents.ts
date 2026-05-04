@@ -28,28 +28,29 @@ export async function incidentRoutes(app: FastifyInstance) {
   // ── Caching helper ─────────────────────────────────────────────────────────────
   // Cache incidents list (configurable TTL via INCIDENTS_LIST_CACHE_TTL)
   const getCachedIncidents = async (offset: number, limit: number) => {
-    const cacheKey = `incidents:${offset}:${limit}`;
+    const cacheKey = Keys.incidents(offset, limit);
     const cached = await redis.get(cacheKey).catch(() => null);
     if (cached) return JSON.parse(cached);
 
-    // Fetch from database
-    const { rows: countRows } = await pgPool.query(`SELECT COUNT(*) as total FROM work_items`);
-    const total = parseInt(countRows[0].total, 10);
+    // Fetch total and incidents in parallel
+    const [countResult, incidents] = await Promise.all([
+      pgPool.query(`SELECT COUNT(*) as total FROM work_items`),
+      pgPool.query(
+        `SELECT w.*, r.root_cause_category
+         FROM work_items w
+         LEFT JOIN rca_records r ON r.work_item_id = w.id
+         ORDER BY
+           CASE priority WHEN 'P0' THEN 1 WHEN 'P1' THEN 2 ELSE 3 END,
+           w.start_time DESC
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
+      )
+    ]);
 
-    const { rows } = await pgPool.query(
-      `SELECT w.*, r.root_cause_category
-       FROM work_items w
-       LEFT JOIN rca_records r ON r.work_item_id = w.id
-       ORDER BY
-         CASE priority WHEN 'P0' THEN 1 WHEN 'P1' THEN 2 ELSE 3 END,
-         w.start_time DESC
-       LIMIT $1 OFFSET $2`,
-      [limit, offset]
-    );
-
+    const total = parseInt(countResult.rows[0].total, 10);
     const result = {
-      incidents: rows.map(toWorkItem),
-      pagination: { offset, limit, total, hasMore: offset + rows.length < total }
+      incidents: incidents.rows.map(toWorkItem),
+      pagination: { offset, limit, total, hasMore: offset + incidents.rows.length < total }
     };
 
     // Cache configurable TTL
@@ -57,9 +58,10 @@ export async function incidentRoutes(app: FastifyInstance) {
     return result;
   };
 
+  // ── Caching helper ─────────────────────────────────────────────────────────────
   // Cache incident detail (configurable TTL via INCIDENT_DETAIL_CACHE_TTL)
   const getCachedIncidentDetail = async (id: string, signalOffset: number, signalLimit: number) => {
-    const cacheKey = `incident:${id}:${signalOffset}:${signalLimit}`;
+    const cacheKey = Keys.incident(id, signalOffset, signalLimit);
     const cached = await redis.get(cacheKey).catch(() => null);
     if (cached) return JSON.parse(cached);
 
@@ -127,21 +129,28 @@ export async function incidentRoutes(app: FastifyInstance) {
   });
 
   // ── State mutations invalidate cache ────────────────────────────────────────────
-  // Helper to invalidate all incident caches
+  // Helper to invalidate all incident caches (pattern-based deletion for efficiency)
   const invalidateIncidentCaches = async (id?: string) => {
-    // Clear all incidents list caches
-    for (let offset = 0; offset < 1000; offset += 50) {
-      await redis.del(`incidents:${offset}:50`).catch(() => {});
-      await redis.del(`incidents:${offset}:100`).catch(() => {});
-      await redis.del(`incidents:${offset}:200`).catch(() => {});
-    }
+    // Use pattern matching to clear caches efficiently (single operation per pattern)
+    const pipeline = redis.pipeline();
+    
+    // Clear incidents list caches using pattern
+    pipeline.eval(
+      `return redis.call('DEL', unpack(redis.call('KEYS', ARGV[1])))`,
+      0,
+      'incidents:*'
+    );
+    
     // Clear specific incident cache if provided
     if (id) {
-      for (let sigOffset = 0; sigOffset < 1000; sigOffset += 50) {
-        await redis.del(`incident:${id}:${sigOffset}:50`).catch(() => {});
-        await redis.del(`incident:${id}:${sigOffset}:100`).catch(() => {});
-      }
+      pipeline.eval(
+        `return redis.call('DEL', unpack(redis.call('KEYS', ARGV[1])))`,
+        0,
+        `incident:${id}:*`
+      );
     }
+    
+    await pipeline.exec().catch(() => {});
   };
 
   // PATCH /incidents/:id/status — state transition

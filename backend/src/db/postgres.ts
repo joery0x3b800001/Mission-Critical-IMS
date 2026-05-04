@@ -15,16 +15,17 @@ pgPool.on('error', (err) => {
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  retries = 3,
-  delayMs = 500
+  retries = config.queueRetryAttempts,
+  delayMs = config.queueRetryDelayMs
 ): Promise<T> {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await fn();
     } catch (err) {
       if (attempt === retries) throw err;
-      console.warn(`[Postgres] Retry attempt ${attempt}/${retries} after error`);
-      await new Promise((r) => setTimeout(r, delayMs * attempt));
+      const delay = delayMs * Math.pow(2, attempt - 1); // exponential backoff
+      console.warn(`[Postgres] Retry attempt ${attempt}/${retries} after ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw new Error('Unreachable');
